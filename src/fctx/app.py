@@ -194,10 +194,12 @@ class MatterStudio:
         cfg = self.cfg.tracking
         self.live_source = None
         self._camera_wanted = cfg.source == "camera"
+        self._camera_seen = False   # ever had a live camera: "lost" vs "none"
         self._retry_thread: threading.Thread | None = None
         self._retry_result: object | None = None
         self._retry_at = 0.0
         self._hand_last_seen = time.perf_counter()
+        self._started_at = time.perf_counter()
         self._attract = False
         self._wake_frames = 0
         self._synthetic = None
@@ -206,6 +208,7 @@ class MatterStudio:
             source.start()
             if cfg.source in ("camera", "video"):
                 self.live_source = source
+                self._camera_seen = True
                 return source, source.describe
             return source, source.describe
         except self._CameraUnavailable as exc:
@@ -265,6 +268,7 @@ class MatterStudio:
             result, self._retry_result, self._retry_thread = self._retry_result, None, None
             if result is not None:
                 self.live_source = result
+                self._camera_seen = True
                 self._hand_last_seen = time.perf_counter()
                 self.tracker = type(self.tracker)(self.cfg.tracking, self.cfg.grab)
                 if self._attract:
@@ -322,7 +326,7 @@ class MatterStudio:
                 self._attract = True
                 self.source = self._synthetic_source()
                 camera = (self.live_source.describe if self.live_source is not None
-                          else "camera lost")
+                          else "camera lost" if self._camera_seen else "no camera")
                 self.source_note = camera + "  (attract mode)"
                 if self.demo is None:
                     self._start_demo()
@@ -523,6 +527,8 @@ class MatterStudio:
             if cfg.profile_interval:
                 self._maybe_profile()
             if cfg.max_frames and self._frame_no >= cfg.max_frames:
+                break
+            if self._restart_due():
                 break
 
         return self._benchmark_report() if self.cfg.headless else None
@@ -809,6 +815,33 @@ class MatterStudio:
 
     #: Consecutive failed frames before a resilient run gives up.
     MAX_CONSECUTIVE_FAILURES = 30
+
+    #: With no attract mode configured, this long without a hand counts as
+    #: "nobody there" for a scheduled restart.
+    RESTART_IDLE = 10.0
+
+    def _restart_due(self, now: float | None = None) -> bool:
+        """Is it time for the scheduled restart, and is nobody watching?
+
+        A long-running process is best restarted on a schedule -- drivers,
+        allocators and the odd library all creep -- but never in front of a
+        person: the exit waits until no hand has been seen for as long as
+        attract mode waits (or :attr:`RESTART_IDLE` when there is none).
+        Without a camera nobody can be there, so it goes at once.
+        """
+        hours = float(self.cfg.max_uptime)
+        if hours <= 0.0:
+            return False
+        now = time.perf_counter() if now is None else now
+        uptime = now - self._started_at
+        if uptime < hours * 3600.0:
+            return False
+        if self.live_source is not None:
+            idle = float(self.cfg.idle_demo) or self.RESTART_IDLE
+            if now - self._hand_last_seen < idle:
+                return False
+        self.log(f"scheduled restart after {uptime / 3600.0:.2f} h of uptime")
+        return True
 
     def _survive(self, exc: BaseException) -> bool:
         """Decide whether a frame that raised ends the run.

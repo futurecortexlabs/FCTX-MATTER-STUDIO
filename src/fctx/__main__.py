@@ -48,6 +48,9 @@ examples
                         "this long (0 disables)")
     g.add_argument("--resilient", action="store_true",
                    help="log a frame that raises, reset the scene and continue")
+    g.add_argument("--max-uptime", type=float, default=None, metavar="HOURS",
+                   help="exit cleanly once this old and nobody is there, so a "
+                        "supervisor restarts a fresh process (kiosk: 12)")
     g.add_argument("--log-file", type=Path, metavar="FILE")
 
     g = p.add_argument_group("scene")
@@ -229,11 +232,16 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
 
     idle_demo = cfg.idle_demo
     resilient = cfg.resilient
+    max_uptime = cfg.max_uptime
     if args.kiosk:
         render = rep(render, fullscreen=True)
         resilient = True
         if idle_demo <= 0.0:
             idle_demo = 20.0
+        if max_uptime <= 0.0:
+            max_uptime = 12.0
+    if args.max_uptime is not None:
+        max_uptime = max(0.0, args.max_uptime)
     if args.idle_demo is not None:
         idle_demo = max(0.0, args.idle_demo)
     if args.resilient:
@@ -251,6 +259,7 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         demo=args.demo or cfg.demo,
         idle_demo=idle_demo,
         resilient=resilient,
+        max_uptime=max_uptime,
         log_file=args.log_file or cfg.log_file,
         max_frames=frames,
         screenshot=args.screenshot,

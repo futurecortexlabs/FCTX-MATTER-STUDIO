@@ -820,7 +820,22 @@ the process exits so that a supervisor (`run_kiosk.bat`) can restart it. A
 good frame clears the count. Without `resilient` the first exception
 propagates, which is what a developer wants.
 
-`--kiosk` is the bundle: fullscreen, `resilient`, `idle_demo = 20`.
+**A scheduled restart.** `max_uptime` hours after start, `_restart_due`
+ends the run cleanly -- but only once no hand has been seen for `idle_demo`
+seconds (`RESTART_IDLE` when there is no attract mode), or at once when
+there is no camera to see one. The supervisor loop starts a fresh process.
+This is hygiene, not a fix for something known to be broken: a 45-minute
+headless soak (`tools/soak.py`) showed dedicated GPU memory flat and the
+process working set creeping by about 57 bytes per drawn frame -- per frame,
+not per second (slowing the loop down changes nothing), outside the Python
+heap (`tracemalloc` is flat), absent when drawing is skipped, a third of it
+the GPU timer query and none of it physics. At a 60 Hz display that is
+12 MiB/h; the unthrottled soak at 230 fps read 52 MiB/h. Twelve hours of
+either is a few hundred megabytes, which a restart in an empty room makes
+irrelevant.
+
+`--kiosk` is the bundle: fullscreen, `resilient`, `idle_demo = 20`,
+`max_uptime = 12`.
 
 ---
 

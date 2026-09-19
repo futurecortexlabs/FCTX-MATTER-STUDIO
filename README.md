@@ -151,16 +151,19 @@ HUD の `E` は正直です。四面体 1 個が 1 サブステップで解け�
 トラブルシューティング）。
 
 ```bash
+setup.bat                                          # 新品 PC の初回セットアップ（uv→依存→モデル→check）
 uv run python tools/calibrate.py --camera 0        # 会場の手のサイズと位置を計測
 uv run python -m fctx --dump-config > venue.toml   # 既定値を書き出して編集
 uv run python -m fctx --config venue.toml --check  # 設定ファイルと機材を本番前に確認
 uv run python -m fctx --config venue.toml --kiosk  # 常設モード
 run_kiosk.bat                                      # 落ちても再起動する監視ループ
+uv run python tools/soak.py --minutes 45           # 常設前のソークテスト（メモリの増加量を出す）
 ```
 
 `--kiosk` はフルスクリーン、**アトラクトモード**（20 秒無人で自動デモ、手が映れば即復帰）、
 **カメラ切断からの自動復帰**（3 秒ごとに再接続）、**フレーム耐性**（例外をログしてシーンを
-リセットし続行）を同時に有効にします。設定ファイルのタイポは起動時にキー名を挙げて
+リセットし続行）、**定期再起動**（12 時間後、無人になった瞬間に正常終了して監視ループが立て直す）を
+同時に有効にします。設定ファイルのタイポは起動時にキー名を挙げて
 エラーになります。
 
 ---

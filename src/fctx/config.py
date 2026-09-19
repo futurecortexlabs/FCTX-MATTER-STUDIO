@@ -305,6 +305,10 @@ class AppConfig:
     #: on.  An exhibition must not die at the first bad frame; a developer
     #: wants the traceback.  Off means raise.
     resilient: bool = False
+    #: Restart hygiene for an installation: after this many hours of uptime,
+    #: exit cleanly at the next moment nobody is interacting, so that a
+    #: supervisor loop (``run_kiosk.bat``) starts a fresh process.  0 never.
+    max_uptime: float = 0.0
     #: Append a log of what happened -- source changes, resets, errors -- to
     #: this file.
     log_file: Path | None = None

@@ -23,6 +23,9 @@ MediaPipe は肌色を使いません——コントラストと十分な照度�
 
 ## 2. 初回セットアップ
 
+新品の Windows PC なら `setup.bat` をダブルクリックするだけです（uv の導入 → 依存の同期 →
+手モデルの取得 → `--check`、何度実行しても安全）。手で打つなら：
+
 ```bash
 uv sync
 uv run python tools/download_models.py
@@ -111,8 +114,9 @@ uv run python -m fctx --config venue.toml --kiosk
 | **アトラクトモード** | 20 秒間誰も手をかざさないと、合成ハンドで振り付けデモが自動で回る。カメラに手が映った瞬間（3 フレーム）に実操作へ戻る |
 | **カメラ切断復帰** | 稼働中にカメラが抜けても止まらない。合成ハンドで続行し、3 秒ごとに再接続を試み、戻れば自動で切り替わる |
 | **フレーム耐性** | 1 フレームで例外が出てもログに残してシーンをリセットし続行。30 回連続で失敗したら終了コードで抜ける（監視スクリプトで再起動） |
+| **定期再起動** | 起動から 12 時間経ったら、次に無人になった瞬間（手が `idle_demo` 秒見えない）に正常終了し、`run_kiosk.bat` が新しいプロセスを立てる。来場者の前で消えることはない |
 
-個別に指定するなら `--idle-demo 20`、`--resilient`、`--log-file run.log`。
+個別に指定するなら `--idle-demo 20`、`--resilient`、`--max-uptime 12`、`--log-file run.log`。
 
 Windows で常時起動させる最小の監視ループ（`run_kiosk.bat`）:
 
@@ -200,3 +204,13 @@ uv run python tools/run_tests.py --cpu      # 幾何・追跡・設定のみ（G
 ```
 
 CI（GitHub Actions）は CPU 側のテストと lint を毎プッシュで回します。
+
+常設前には**ソークテスト**を一度回してください。キオスクと同じ構成（カメラ無し・アトラクト
+モード・耐性あり）でヘッドレスに長時間走らせ、プロセスの RSS と専用 GPU メモリを 30 秒ごとに
+記録して、1 時間あたりの増加量を出します：
+
+```bash
+uv run python tools/soak.py --minutes 45     # captures/soak.csv と verdict
+```
+
+`verdict: flat` なら一日回せます。`GROWING` なら CSV を添えて報告してください。

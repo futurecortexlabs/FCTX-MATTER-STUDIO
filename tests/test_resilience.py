@@ -242,6 +242,36 @@ def a_synthetic_only_run_never_loses_its_hand_to_attract_mode() -> None:
 
 
 @case
+def a_scheduled_restart_waits_until_nobody_is_there() -> None:
+    cam = ScriptedCamera()
+    cam.show_hand = True
+    app = _app(cam, idle_demo=0.2)
+    try:
+        _frames(app, 5)
+        require(not app._restart_due(), "a run with max_uptime 0 wanted to restart")
+        app.cfg = dataclasses.replace(app.cfg, max_uptime=1.0)
+        require(not app._restart_due(), "a young process wanted to restart")
+        app._started_at -= 2 * 3600.0
+        _frames(app, 2)
+        require(not app._restart_due(), "restart with a hand in front of the camera")
+        cam.show_hand = False
+        deadline = time.perf_counter() + 3.0
+        while time.perf_counter() < deadline and not app._restart_due():
+            _frames(app, 1)
+            time.sleep(0.01)
+        require(app._restart_due(), "nobody there for longer than idle_demo, yet no restart")
+        note("restart is due only once the last hand is idle_demo old")
+
+        # No camera at all: nobody can be there, so it goes at once.
+        cam.die = True
+        _frames(app, 3)
+        require(app.live_source is None and app._restart_due(),
+                "without a camera the restart still waited")
+    finally:
+        app.close()
+
+
+@case
 def a_resilient_run_survives_a_frame_that_raises() -> None:
     cam = ScriptedCamera()
     cam.show_hand = True
