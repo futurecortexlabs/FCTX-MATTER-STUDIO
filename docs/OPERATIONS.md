@@ -1,0 +1,202 @@
+# 運用ガイド — 展示・授業・実験室で回すために
+
+このドキュメントは「動かす人」向けです。設計は [ARCHITECTURE.md](ARCHITECTURE.md)、
+最初の起動は [README](../README.md) を見てください。
+
+---
+
+## 1. 必要な機材
+
+| 項目 | 推奨 | 最低 |
+|---|---|---|
+| GPU | NVIDIA RTX 40/50 世代 | CUDA 対応 NVIDIA（VRAM 4 GB） |
+| ドライバ | 最新 Game Ready / Studio | CUDA 12.x が動くもの |
+| カメラ | 1080p / 60 fps の USB ウェブカメラ（Logitech Brio 等） | 720p / 30 fps |
+| OS | Windows 11 | Windows 10 |
+| Python | uv が導入する 3.12（自動） | — |
+
+カメラは**正面から、胸の高さ**に。真上や真下からだと MediaPipe の手の向き推定が
+不安定になります。逆光を避け、手が背景より明るく写るようにしてください。
+MediaPipe は肌色を使いません——コントラストと十分な照度が全てです。
+
+---
+
+## 2. 初回セットアップ
+
+```bash
+uv sync
+uv run python tools/download_models.py
+uv run python -m fctx --check
+```
+
+`--check` が `ready.` と言えば動きます。`[!!]` の行があればその行が理由です。
+`[--] no camera found` はカメラ無しでも動く（合成ハンド）という意味で、エラーではありません。
+
+---
+
+## 3. 会場に合わせる（キャリブレーション）
+
+ステージ（画面内で手が届く空間）とカメラの対応は 3 つの数で決まります。
+会場ごとにカメラ距離が違うので、**設置したら必ず一度**計測してください。
+
+```bash
+uv run python tools/calibrate.py --camera 0 --seconds 20
+```
+
+20 秒間、開いた手を使いたい空間の隅々（近い・遠い・左右・上下）に動かします。
+終わると `[tracking]` ブロックが出るので設定ファイルに貼ります：
+
+```toml
+[tracking]
+camera_index = 0
+reference_hand_span = 0.243   # この距離が「ステージ中央」になる
+depth_scale = 0.51            # 近い・遠いが z_range の両端に来る
+```
+
+「手が画像の 15% 以下しか覆っていない」と言われたら、カメラが遠すぎます。
+
+---
+
+## 4. 設定ファイル
+
+全ての調整項目は TOML で書けます。まず既定値を書き出して、変えたい行だけ残します：
+
+```bash
+uv run python -m fctx --dump-config > venue.toml
+uv run python -m fctx --config venue.toml
+```
+
+典型的な会場設定：
+
+```toml
+preset = "cloth"
+
+[tracking]
+camera_index = 1
+reference_hand_span = 0.243
+depth_scale = 0.51
+mirror = true          # 鏡像。来場者は右に動かすと右に動くのを期待する
+
+[render]
+fullscreen = true
+show_hud = false       # 展示ではテレメトリを隠す
+show_webcam = true     # 来場者に「自分の手が見えている」ことを示す
+
+[scene]
+hardness = 0.35
+```
+
+タイポは起動時にエラーになります（`unknown key 'camera_idx' (did you mean camera_index?)`）。
+黙って無視されることはありません。本番前の確認は `--check` に設定ファイルを添えます：
+
+```bash
+uv run python -m fctx --config venue.toml --check
+```
+
+`[ok]  config venue.toml (cloth, camera 1, source camera)` の行が出れば、その日の設定で起動できます。
+
+---
+
+## 5. 展示モード（キオスク）
+
+```bash
+uv run python -m fctx --config venue.toml --kiosk
+```
+
+`--kiosk` は次を同時に有効にします：
+
+| 機能 | 動作 |
+|---|---|
+| フルスクリーン | `F11` で切替可能 |
+| **アトラクトモード** | 20 秒間誰も手をかざさないと、合成ハンドで振り付けデモが自動で回る。カメラに手が映った瞬間（3 フレーム）に実操作へ戻る |
+| **カメラ切断復帰** | 稼働中にカメラが抜けても止まらない。合成ハンドで続行し、3 秒ごとに再接続を試み、戻れば自動で切り替わる |
+| **フレーム耐性** | 1 フレームで例外が出てもログに残してシーンをリセットし続行。30 回連続で失敗したら終了コードで抜ける（監視スクリプトで再起動） |
+
+個別に指定するなら `--idle-demo 20`、`--resilient`、`--log-file run.log`。
+
+Windows で常時起動させる最小の監視ループ（`run_kiosk.bat`）:
+
+```bat
+@echo off
+cd /d %~dp0
+:loop
+uv run python -m fctx --config venue.toml --kiosk --log-file logs\fctx.log
+echo restart at %date% %time% >> logs\restarts.log
+timeout /t 3 >nul
+goto loop
+```
+
+---
+
+## 6. 操作の勘どころ
+
+- **つまむ**：親指と人差し指の先を付ける。閾値はヒステリシス付き（0.62 で掴み、0.42 で離す）なので、しっかり閉じて、はっきり開く。
+- **持ち上げる**：掴んだら手首を動かす。指の開閉は握力であって移動ではない（設計上そうしてある——指を開いても物は飛ばない）。
+- **硬さ**：マウスホイール、`[` `]`、または `A` で自動掃引。掴んでいる最中に変えるのが見せ場。
+- 布は上辺 2 点で吊ってある。下端をつまんで持ち上げると折り目が出やすい。
+
+---
+
+## 7. パフォーマンスの目安
+
+RTX 5070 Ti、1600×900、他の GPU アプリ常駐時の実測：
+
+| プリセット | physics | render | fps |
+|---|---:|---:|---:|
+| cloth | 1.0 ms | 1.3 ms | 207 |
+| soft | 2.2 ms | 4.5 ms | 96 |
+| grain 24,000 | 1.1 ms | 1.5 ms | 199 |
+
+60 Hz のディスプレイでは vsync で 60 に張り付きます。フレームが落ちるときの順で：
+
+1. `[render] ssao_samples = 0`
+2. `[render] bloom = false`
+3. `[render] msaa = 2`
+4. `[scene] cloth_resolution = 56`（既定 72）／`soft_resolution = 17`（既定 21）
+5. `[solver] substeps = 8`（既定 12。**材質の手触りは変わりません**——XPBD のコンプライアンス定式化はサブステップ数に依存しない設計です。変わるのは硬い端での収束）
+
+`--profile 2` で 2 秒ごとに内訳が出ます。
+
+---
+
+## 8. トラブルシューティング
+
+| 症状 | 見るところ |
+|---|---|
+| 起動直後に落ちる | `--check`。`--verbose` で完全なトレースバック |
+| 手が映らない | インセット（`W`）に骨格が出ているか。出ていなければ照明・距離。`min_detection_confidence` を 0.45 に下げるのは最後の手段 |
+| 手が震える／布が揺れ続ける | One-Euro フィルタ：`filter_min_cutoff` を 1.2 に（滑らか・遅延増） |
+| 手の反応が遅い | `filter_beta` を 8 に（既定 5.0）。`filter_min_cutoff` を 2.5 に |
+| 手が奥行き方向に飛ぶ | キャリブレーションをやり直す。`depth_size_blend` を 0.6 に上げると手のサイズ推定を重視 |
+| 掴めない | ピンチ点が物体から 7.5 cm 以内にあるか。`[grab] radius` を 0.10 に |
+| 物が手からすり抜ける | `[grab] mass_scale` を 0.25 に（保持を強く） |
+| 布が爆発した | `R` でリセット。ログに `reset` が並ぶなら `--log-file` を添えて報告 |
+| カメラが認識されない | Windows の「カメラのプライバシー設定」でデスクトップアプリを許可。他のアプリ（Teams/Zoom）がカメラを掴んでいないか |
+| 60 fps 以上出したい | `[render] vsync = false` |
+
+---
+
+## 9. 記録と再現
+
+不具合の再現には手の動きの記録が一番役に立ちます：
+
+```bash
+uv run python -m fctx --config venue.toml --record bug01.fhr   # F9 でも開始/停止
+uv run python -m fctx --config venue.toml --source replay --replay bug01.fhr
+```
+
+`.fhr` はランドマークだけ（映像は含まない）なので数十 KB です。同じ設定ファイルと
+一緒に送れば、こちらで同じ挙動を再現できます。
+
+---
+
+## 10. 更新とテスト
+
+```bash
+git pull
+uv sync
+uv run python tools/run_tests.py            # 全部（GPU 必要、約 4 分）
+uv run python tools/run_tests.py --cpu      # 幾何・追跡・設定のみ（GPU 不要）
+```
+
+CI（GitHub Actions）は CPU 側のテストと lint を毎プッシュで回します。

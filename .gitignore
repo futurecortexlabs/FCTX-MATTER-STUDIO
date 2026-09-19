@@ -1,0 +1,7 @@
+assets/models/*.task
+recordings/
+captures/
+docs/showcase.mp4
+__pycache__/
+*.pyc
+.venv/
