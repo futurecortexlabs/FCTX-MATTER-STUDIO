@@ -42,7 +42,7 @@ class ConfigError(ValueError):
 
 
 #: Sections of the file, in the order they are dumped.
-_SECTIONS = ("scene", "solver", "grab", "tracking", "render", "camera")
+_SECTIONS = ("scene", "solver", "grab", "tracking", "render", "camera", "exhibit")
 
 
 def load_config(path: str | Path, base: AppConfig | None = None,

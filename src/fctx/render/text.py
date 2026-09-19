@@ -23,7 +23,8 @@ import numpy as np
 from .geometry import unit_quad
 from .shaders import ShaderLibrary
 
-__all__ = ["TextAtlas", "OverlayBatch", "FONT_CANDIDATES", "RGBA"]
+__all__ = ["TextAtlas", "OverlayBatch", "LabelCache", "FONT_CANDIDATES",
+           "LABEL_FONT_CANDIDATES", "RGBA"]
 
 #: Tried in order.  Consolas and Cascadia Mono ship with Windows; DejaVu comes
 #: with most Linux distributions and with matplotlib.
@@ -34,6 +35,20 @@ FONT_CANDIDATES: tuple[str, ...] = (
     "DejaVuSansMono.ttf",
     "lucon.ttf",
     "cour.ttf",
+)
+
+#: For text the ASCII atlas cannot draw -- a Japanese prompt, a venue's own
+#: material names.  Yu Gothic, Meiryo and BIZ UD ship with Windows; Noto is
+#: what a Linux box is likely to have.
+LABEL_FONT_CANDIDATES: tuple[str, ...] = (
+    "YuGothM.ttc",
+    "meiryo.ttc",
+    "BIZ-UDGothicR.ttc",
+    "msgothic.ttc",
+    "NotoSansCJK-Regular.ttc",
+    "NotoSansCJKjp-Regular.otf",
+    "NotoSansJP-Regular.ttf",
+    "DejaVuSans.ttf",
 )
 
 FIRST_CHAR = 32
@@ -157,8 +172,97 @@ class TextAtlas:
         self.texture.release()
 
 
+def _label_font(px: int):
+    from PIL import ImageFont
+
+    for name in LABEL_FONT_CANDIDATES + FONT_CANDIDATES:
+        for candidate in (Path("C:/Windows/Fonts") / name, Path(name)):
+            try:
+                return ImageFont.truetype(str(candidate), px), str(candidate)
+            except OSError:
+                continue
+    try:
+        return ImageFont.load_default(size=px), "PIL default"
+    except TypeError:
+        return ImageFont.load_default(), "PIL default"
+
+
+class LabelCache:
+    """Whole strings rasterised on demand, for text outside the atlas.
+
+    The atlas is monospace ASCII, which is right for readouts and wrong for
+    a prompt in the visitor's language.  A label is one PIL rendering of one
+    string at one size, kept as a small RGBA texture (white, with the
+    coverage in alpha, so the tint colours it) and reused frame after frame;
+    the cache is bounded so a stream of one-off strings cannot grow it.
+    """
+
+    def __init__(self, ctx: moderngl.Context, capacity: int = 64) -> None:
+        self.ctx = ctx
+        self.capacity = int(capacity)
+        self._fonts: dict[int, object] = {}
+        self._items: dict[tuple[str, int], tuple[moderngl.Texture, int, int]] = {}
+        self._order: list[tuple[str, int]] = []
+        self.source = ""
+
+    def _font(self, px: int):
+        font = self._fonts.get(px)
+        if font is None:
+            font, self.source = _label_font(px)
+            self._fonts[px] = font
+        return font
+
+    def get(self, text: str, size_px: float) -> tuple[moderngl.Texture, int, int]:
+        """The texture for ``text`` at ``size_px`` line height, and its size."""
+        from PIL import Image, ImageDraw
+
+        px = max(8, int(round(size_px * 0.92)))
+        key = (text, px)
+        hit = self._items.get(key)
+        if hit is not None:
+            self._order.remove(key)
+            self._order.append(key)
+            return hit
+        font = self._font(px)
+        probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+        left, top, right, bottom = probe.multiline_textbbox((0, 0), text, font=font)
+        pad = max(2, px // 8)
+        w = max(1, int(right - left) + 2 * pad)
+        h = max(1, int(bottom) + 2 * pad)
+        img = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(img).multiline_text((pad - left, pad), text, font=font, fill=255)
+        alpha = np.asarray(img, dtype=np.uint8)
+        rgba = np.empty((h, w, 4), dtype=np.uint8)
+        rgba[..., :3] = 255
+        rgba[..., 3] = alpha
+        tex = self.ctx.texture((w, h), 4, np.ascontiguousarray(rgba).tobytes())
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        tex.repeat_x = tex.repeat_y = False
+        if len(self._order) >= self.capacity:
+            old = self._order.pop(0)
+            self._items.pop(old)[0].release()
+        self._items[key] = (tex, w, h)
+        self._order.append(key)
+        return self._items[key]
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def release(self) -> None:
+        for tex, _, _ in self._items.values():
+            tex.release()
+        self._items.clear()
+        self._order.clear()
+
+
 class OverlayBatch:
-    """Accumulates 2D instances and draws them all in one call."""
+    """Accumulates 2D instances and draws them all in one call.
+
+    Text the atlas cannot draw goes through :attr:`labels` when one is
+    attached: each such string becomes one textured quad drawn after the
+    main batch, in append order, so a prompt in Japanese layers exactly
+    where its ASCII equivalent would.
+    """
 
     FLOATS_PER_INSTANCE = 20
 
@@ -190,11 +294,24 @@ class OverlayBatch:
             ],
         )
         self._blank = ctx.texture((1, 1), 4, b"\xff\xff\xff\xff")
+        #: Optional :class:`LabelCache` for non-ASCII text.
+        self.labels: LabelCache | None = None
+        self._label_draws: list[tuple[moderngl.Texture,
+                                      tuple[float, float, float, float], RGBA]] = []
+        self._label_row = np.zeros((1, self.FLOATS_PER_INSTANCE), dtype=np.float32)
 
     # -- accumulation -----------------------------------------------------
 
     def clear(self) -> None:
         self._count = 0
+        self._label_draws.clear()
+
+    def measure(self, s: str, size_px: float) -> tuple[float, float]:
+        """Width and height ``s`` would occupy, whichever path draws it."""
+        if self.labels is not None and not s.isascii():
+            _, w, h = self.labels.get(s, size_px)
+            return float(w), float(h)
+        return self.atlas.measure(s, size_px)
 
     def __len__(self) -> int:
         return self._count
@@ -250,6 +367,15 @@ class OverlayBatch:
     def text(self, s: str, x: float, y: float, size_px: float, color: RGBA,
              *, align: str = "left") -> float:
         """Draw ``s`` with its top-left at ``(x, y)``.  Returns the advance width."""
+        if self.labels is not None and not s.isascii():
+            tex, w, h = self.labels.get(s, size_px)
+            if align == "center":
+                x -= w * 0.5
+            elif align == "right":
+                x -= w
+            self._label_draws.append((tex, (x, y - (h - size_px) * 0.5, float(w), float(h)),
+                                      tuple(color)))
+            return float(w)
         adv = self.atlas.advance(size_px)
         pen_y = y
         width = 0.0
@@ -275,20 +401,34 @@ class OverlayBatch:
 
     def draw(self, resolution: tuple[int, int],
              image: moderngl.Texture | None = None) -> None:
-        if self._count == 0:
+        if self._count == 0 and not self._label_draws:
             return
-        self._instance_vbo.write(
-            np.ascontiguousarray(self._data[: self._count]).tobytes())
         self.program["u_resolution"].value = (float(resolution[0]),
                                               float(resolution[1]))
         self.atlas.texture.use(0)
         self.program["u_font"].value = 0
-        (image or self._blank).use(1)
         self.program["u_image"].value = 1
-        self._vao.render(moderngl.TRIANGLE_STRIP, vertices=4,
-                         instances=self._count)
+        if self._count:
+            self._instance_vbo.write(
+                np.ascontiguousarray(self._data[: self._count]).tobytes())
+            (image or self._blank).use(1)
+            self._vao.render(moderngl.TRIANGLE_STRIP, vertices=4,
+                             instances=self._count)
+        for tex, rect, color in self._label_draws:
+            row = self._label_row[0]
+            row[0:4] = rect
+            row[4:8] = (0.0, 0.0, 1.0, 1.0)
+            row[8:12] = color
+            row[12:16] = color
+            row[16:20] = (0.0, MODE_IMAGE, 0.0, 1.0)
+            self._instance_vbo.write(self._label_row.tobytes())
+            tex.use(1)
+            self._vao.render(moderngl.TRIANGLE_STRIP, vertices=4, instances=1)
 
     def release(self) -> None:
+        if self.labels is not None:
+            self.labels.release()
+            self.labels = None
         self._vao.release()
         self._corner_vbo.release()
         self._instance_vbo.release()

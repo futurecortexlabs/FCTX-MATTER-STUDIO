@@ -52,6 +52,11 @@ class GripState:
     release_speed: float = 0.0
     _track_id: int = -1
 
+    @property
+    def track_id(self) -> int:
+        """The hand this grip belongs to (-1 while the slot is empty)."""
+        return self._track_id
+
 
 class GripManager:
     """Decide, per hand slot, when to call ``begin_grab`` / ``end_grab``.

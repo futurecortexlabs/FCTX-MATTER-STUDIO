@@ -44,7 +44,7 @@ from .context import Window, window_for_context
 from .geometry import capsule_shell, grid_plane
 from .hud import Hud
 from .shaders import ShaderLibrary
-from .text import OverlayBatch, TextAtlas
+from .text import LabelCache, OverlayBatch, TextAtlas
 
 __all__ = ["Renderer", "Lighting", "BLOOM_LEVELS"]
 
@@ -457,6 +457,7 @@ class Renderer:
     def _build_overlay(self) -> None:
         self.atlas = TextAtlas(self.ctx, px=44)
         self.overlay = OverlayBatch(self.ctx, self.library, self.atlas)
+        self.overlay.labels = LabelCache(self.ctx)
         self.hud = Hud()
 
     # -- size-dependent resources -----------------------------------------

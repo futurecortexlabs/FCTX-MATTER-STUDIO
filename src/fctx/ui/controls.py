@@ -69,6 +69,9 @@ class ControlState:
     #: the synthetic hand; on a camera it still drives the dial.
     demo: bool = False
     demo_toggle_requested: bool = False
+    #: +1 / -1 for one frame: step the dial to the next / previous
+    #: catalogue material (M / N).
+    material_step: int = 0
     _sweep_phase: float = 0.0
 
     preset_index: int = 0
@@ -110,6 +113,7 @@ class ControlState:
         self.fullscreen_requested = False
         self.record_toggle_requested = False
         self.demo_toggle_requested = False
+        self.material_step = 0
         self.step_once = False
         self.orbit_delta = (0.0, 0.0)
         self.zoom_delta = 0.0
@@ -193,6 +197,10 @@ class Controls:
                 s.wind = not s.wind
             case "d":
                 s.demo_toggle_requested = True
+            case "m":
+                s.material_step = 1
+            case "n":
+                s.material_step = -1
             case "a":
                 s.auto_sweep = not s.auto_sweep
                 s._sweep_phase = math.asin(

@@ -27,7 +27,7 @@ __all__ = ["HudTheme", "Hud", "CONTROL_HINT"]
 #: legibility.  At 180 characters it still draws at its full 14 px on any 16:9
 #: window; the separators are two spaces for that reason, not three.
 CONTROL_HINT = (
-    "WHEEL/[ ] hardness  D demo  A sweep  F wind  1-5 preset  R reset  P pause  . step  "
+    "WHEEL/[ ] hardness  M/N material  D demo  A sweep  F wind  1-5 preset  R reset  P pause  . step  "
     "RIGHT-DRAG orbit  CTRL+WHEEL zoom  H hud  W webcam  K hands  G wire  "
     "F9 rec  F12 shot  F11 full  ESC quit"
 )
@@ -110,7 +110,7 @@ class Hud:
             if alpha <= 0.0:
                 continue
             size_px = 22.0 * scale
-            w = len(text) * batch.atlas.advance(size_px)
+            w = batch.measure(text, size_px)[0]
             pad = 14.0 * scale
             batch.rect(width * 0.5 - w * 0.5 - pad, y - pad * 0.5,
                        w + pad * 2.0, size_px + pad,

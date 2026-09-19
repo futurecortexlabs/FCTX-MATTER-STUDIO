@@ -52,6 +52,13 @@ examples
                    help="exit cleanly once this old and nobody is there, so a "
                         "supervisor restarts a fresh process (kiosk: 12)")
     g.add_argument("--log-file", type=Path, metavar="FILE")
+    g.add_argument("--analytics", type=Path, metavar="CSV",
+                   help="append visitor and interaction events here "
+                        "(kiosk: logs/events.csv); see tools/report.py")
+    g.add_argument("--catalog", type=Path, metavar="TOML",
+                   help="a [[material]] catalogue naming what the dial shows")
+    g.add_argument("--coach", action=argparse.BooleanOptionalAction, default=None,
+                   help="show visitor prompts (kiosk: on)")
 
     g = p.add_argument_group("scene")
     g.add_argument("--preset", choices=PRESETS, default=None,
@@ -233,6 +240,7 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
     idle_demo = cfg.idle_demo
     resilient = cfg.resilient
     max_uptime = cfg.max_uptime
+    exhibit = cfg.exhibit
     if args.kiosk:
         render = rep(render, fullscreen=True)
         resilient = True
@@ -240,6 +248,14 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
             idle_demo = 20.0
         if max_uptime <= 0.0:
             max_uptime = 12.0
+        exhibit = rep(exhibit, coach=True,
+                      analytics=exhibit.analytics or Path("logs/events.csv"))
+    if args.analytics is not None:
+        exhibit = rep(exhibit, analytics=args.analytics)
+    if args.catalog is not None:
+        exhibit = rep(exhibit, catalog=args.catalog)
+    if args.coach is not None:
+        exhibit = rep(exhibit, coach=bool(args.coach))
     if args.max_uptime is not None:
         max_uptime = max(0.0, args.max_uptime)
     if args.idle_demo is not None:
@@ -260,6 +276,7 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         idle_demo=idle_demo,
         resilient=resilient,
         max_uptime=max_uptime,
+        exhibit=exhibit,
         log_file=args.log_file or cfg.log_file,
         max_frames=frames,
         screenshot=args.screenshot,

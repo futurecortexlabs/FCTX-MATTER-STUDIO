@@ -272,6 +272,42 @@ class SceneConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ExhibitConfig:
+    """What a venue needs on top of the simulation (see :mod:`fctx.exhibit`).
+
+    Gestures for the dial, prompts for the visitor, a catalogue of named
+    materials for the HUD, and a record of what happened for the report.
+    """
+
+    #: While one hand holds matter, the other hand's height sets the dial:
+    #: low is soft, high is hard.  Nothing happens until something is held,
+    #: so a hand reaching in to grab does not swing the dial on the way.
+    hardness_by_free_hand: bool = True
+    #: While matter is held, sweep the dial on its own -- for venues that
+    #: expect one-handed use.  A free hand, when there is one, wins.
+    sweep_while_holding: bool = False
+    #: Seconds for one soft -> hard -> soft sweep.
+    sweep_period: float = 9.0
+    #: Show short prompts: how to grab, how to change hardness, how to let go.
+    coach: bool = False
+    prompt_grab: str = "PINCH THUMB AND INDEX TO GRAB"
+    prompt_hardness: str = "RAISE YOUR OTHER HAND TO CHANGE THE HARDNESS"
+    prompt_feel: str = "HOLD ON -- FEEL IT CHANGE"
+    prompt_release: str = "OPEN YOUR FINGERS TO LET GO"
+    #: Seconds a prompt stays before it fades.
+    prompt_seconds: float = 6.0
+    #: A ``[[material]]`` TOML catalogue; None uses the built-in one.
+    catalog: Path | None = None
+    #: Name the nearest catalogue material on the HUD.
+    show_material: bool = True
+    #: Append visitor and interaction events to this CSV; None keeps counts
+    #: in memory only.  ``tools/report.py`` turns the file into a report.
+    analytics: Path | None = None
+    #: Seconds without any hand before a visitor session is over.
+    session_gap: float = 15.0
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     solver: SolverConfig = field(default_factory=SolverConfig)
     grab: GrabConfig = field(default_factory=GrabConfig)
@@ -279,6 +315,7 @@ class AppConfig:
     render: RenderConfig = field(default_factory=RenderConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
     scene: SceneConfig = field(default_factory=SceneConfig)
+    exhibit: ExhibitConfig = field(default_factory=ExhibitConfig)
     device: str = "cuda:0"
     #: Exit after this many frames.  Used by the smoke tests; 0 means run
     #: until the window is closed.

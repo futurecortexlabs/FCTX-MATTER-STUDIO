@@ -20,10 +20,12 @@ import numpy as np
 os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 
 from .config import RECORDING_DIR, AppConfig, switch_preset
+from .core import catalog as catalog_mod
 from .core.clock import FixedTimestep, PerfMonitor, Rolling, Stopwatch
 from .core.material import DEFAULT_MATERIALS, Material, evaluate
 from .core.types import FrameStats, HandPose, MatterKind
 from .demo import Choreography
+from .exhibit import Coach, HardnessDirector, SessionLog
 from .interaction import GripManager, Notifier
 from .ui.controls import SYNTHETIC_HELP_LINES, Controls, ControlState
 
@@ -123,6 +125,20 @@ class MatterStudio:
         ))
         self.grips = GripManager(cfg.grab, cfg.tracking.max_hands)
         self.notify = Notifier()
+        # -- venue features: gestures for the dial, prompts, catalogue, record
+        ex = cfg.exhibit
+        self.director = HardnessDirector(ex, cfg.tracking)
+        self.coach = Coach(ex)
+        self._prompt = None
+        self.session = SessionLog(ex.analytics, ex.session_gap)
+        self.catalog = (catalog_mod.load_catalog(ex.catalog) if ex.catalog is not None
+                        else catalog_mod.DEFAULT_CATALOG)
+        if ex.catalog is not None:
+            for params in DEFAULT_MATERIALS.values():
+                out = catalog_mod.check_range(self.catalog, params)
+                if out:
+                    print(f"fctx: catalogue: {', '.join(out)} outside the "
+                          f"{params.kind.name.lower()} dial's range; clamped to its ends")
         self.clock = FixedTimestep(cfg.solver.rate_hz)
         self.perf = PerfMonitor()
         self._tet_ceiling = self.state.tet_stiffness_ceiling(self.clock.dt)
@@ -238,6 +254,7 @@ class MatterStudio:
     def _camera_lost(self, exc: BaseException) -> None:
         """The live camera died mid-session; carry on without it."""
         print(f"fctx: camera lost: {exc}")
+        self.session.camera(False, str(exc))
         try:
             if self.live_source is not None:
                 self.live_source.close()
@@ -280,6 +297,7 @@ class MatterStudio:
                     self.source_note = result.describe
                 self.notify.post("CAMERA BACK", 2.5)
                 print(f"fctx: camera back: {result.describe}")
+                self.session.camera(True, result.describe)
             else:
                 self._retry_at = time.perf_counter() + self.CAMERA_RETRY
             return
@@ -324,6 +342,7 @@ class MatterStudio:
         if not self._attract:
             if now - self._hand_last_seen >= idle:
                 self._attract = True
+                self.session.attract(True)
                 self.source = self._synthetic_source()
                 camera = (self.live_source.describe if self.live_source is not None
                           else "camera lost" if self._camera_seen else "no camera")
@@ -332,6 +351,7 @@ class MatterStudio:
                     self._start_demo()
         elif self._wake_frames >= self.ATTRACT_WAKE_FRAMES:
             self._attract = False
+            self.session.attract(False)
             self._wake_frames = 0
             if self.demo is not None:
                 self._stop_demo()
@@ -534,6 +554,13 @@ class MatterStudio:
         return self._benchmark_report() if self.cfg.headless else None
 
     def _apply_commands(self, ctrl: ControlState) -> None:
+        if ctrl.material_step and self.materials:
+            entry = catalog_mod.step(self.catalog, self.materials[0], ctrl.material_step)
+            if entry is not None:
+                target = catalog_mod.hardness_for(self.materials[0].params, entry.value)
+                self.controls.state.hardness_target = target
+                self.controls.state.auto_sweep = False
+                self.notify.post(f"~ {entry.name}", 1.8)
         if ctrl.reset_requested:
             # XPBDSolver.reset already resets the state; calling both wiped
             # every device array twice for one key press.
@@ -768,7 +795,8 @@ class MatterStudio:
         # on the frame a hand first appears would otherwise skip the fade
         # entirely and materialise a full-radius hand inside the matter.
         self.solver.set_hands(self._poses, min(frame_dt, self.clock.max_delta))
-        self.grips.update(self._poses, frame_dt, self.solver)
+        grips = self.grips.update(self._poses, frame_dt, self.solver)
+        self._venue_frame(ctrl, grips, frame_dt)
 
         steps = 1 if self.cfg.lockstep else self.clock.tick()
         if ctrl.paused:
@@ -784,6 +812,33 @@ class MatterStudio:
         # number that changes faster than this anyway.
         if self._frame_no % self.STATS_INTERVAL == 0:
             self._solver_stats = self.solver.stats()
+
+    def _venue_frame(self, ctrl: ControlState, grips, frame_dt: float) -> None:
+        """The exhibit layer: dial gestures, the visitor record, the prompt.
+
+        Runs on the poses and grips of this frame, after the grip manager has
+        decided who holds what; the director writes the *target* hardness, so
+        its effect reaches the material through the controls' smoothing on
+        the next frame like any other input.
+        """
+        holding = {g.track_id for g in grips if g.held}
+        for g in grips:
+            if g.just_grabbed:
+                self.session.grab(g.track_id)
+            if g.just_released:
+                self.session.release(g.track_id)
+        live = self.source is self.live_source
+        self.session.hands(len(self._poses) if live else 0)
+        self.session.dial(ctrl.hardness, bool(holding))
+        # The demonstration owns the dial while it runs, and the synthetic
+        # hand has no second hand to raise.
+        if self.demo is None and live:
+            self.director.update(self._poses, holding, self.controls.state, frame_dt)
+        else:
+            self.director.driving = None
+        self._prompt = self.coach.update(
+            len(self._poses) if live else 0, bool(holding), ctrl.hardness,
+            self.director.driving, frame_dt)
 
     def _draw(self, ctrl: ControlState) -> None:
         stats = FrameStats(
@@ -808,7 +863,8 @@ class MatterStudio:
             stats=stats,
             hud_lines=self._hud_lines(ctrl),
             hardness=ctrl.hardness,
-            notifications=self.notify.update(self.perf.frame.last / 1000.0),
+            notifications=(self.notify.update(self.perf.frame.last / 1000.0)
+                           + ([self._prompt] if self._prompt is not None else [])),
             show_hud=ctrl.show_hud,
             paused=ctrl.paused,
         )
@@ -841,6 +897,7 @@ class MatterStudio:
             if now - self._hand_last_seen < idle:
                 return False
         self.log(f"scheduled restart after {uptime / 3600.0:.2f} h of uptime")
+        self.session.event("restart", f"{uptime / 3600.0:.2f}h")
         return True
 
     def _survive(self, exc: BaseException) -> bool:
@@ -855,6 +912,7 @@ class MatterStudio:
             return False
         self._failures = getattr(self, "_failures", 0) + 1
         self.log(f"frame {self._frame_no} raised {exc!r}", exc=exc)
+        self.session.error(repr(exc))
         if self._failures > self.MAX_CONSECUTIVE_FAILURES:
             self.log("too many consecutive failures; giving up")
             return False
@@ -888,6 +946,10 @@ class MatterStudio:
         # frame, so repeating HELP_LINES here would just be a second copy
         # covering the matter. Only what the strip cannot say goes in.
         lines = [self.source_note]
+        if self.cfg.exhibit.show_material and self.materials:
+            entry = catalog_mod.nearest(self.catalog, self.materials[0])
+            if entry is not None:
+                lines.append(f"~ {entry.name}" + (f"  ({entry.note})" if entry.note else ""))
         if getattr(self.source, "is_synthetic", False):
             lines.extend(SYNTHETIC_HELP_LINES)
         if self.demo is not None:
@@ -977,6 +1039,11 @@ class MatterStudio:
 
     # -- teardown ----------------------------------------------------------
 
+    def _close_session(self) -> None:
+        summary = self.session.close()
+        if summary.visitors or summary.grabs or self.cfg.exhibit.analytics is not None:
+            self.log("session: " + self.session.describe())
+
     def close(self) -> None:
         if self._closed:
             return
@@ -984,7 +1051,8 @@ class MatterStudio:
         # Order matters: the renderer holds CUDA-registered GL buffers, and
         # unregistering them after the GL context is gone raises
         # "invalid OpenGL or DirectX context" out of the CUDA driver.
-        for shutdown in (self._stop_recording,
+        for shutdown in (self._close_session,
+                         self._stop_recording,
                          lambda: self.source.close(),
                          lambda: self.live_source.close() if self.live_source is not None else None,
                          lambda: self._synthetic.close() if self._synthetic is not None else None,

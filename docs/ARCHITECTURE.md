@@ -386,6 +386,54 @@ the declared length, strings to `MatterKind`, strings to `Path` — and refused
 otherwise. `dump_config` writes the effective configuration back out, and
 `tests/test_settings.py` proves the round trip is exact.
 
+### 4.6 `fctx.exhibit` and `fctx.core.catalog` — the venue layer
+
+```python
+class HardnessDirector:   # the dial from the hands
+    def update(self, poses, holding_ids: set[int], state: ControlState, dt) -> None
+    driving: str | None   # "free_hand" | "sweep" | None this frame
+class Coach:              # one prompt at a time
+    def update(self, hands, any_held, hardness, driving, dt) -> Prompt | None
+class SessionLog:         # visitors, grabs, dial moves -> CSV
+    def hands(n) / grab(id) / release(id) / dial(h, held) / attract(on) / camera(back) / error(s)
+    def close() -> Summary
+
+def load_catalog(path) -> tuple[CatalogEntry, ...]
+def nearest(entries, material) -> CatalogEntry | None
+def step(entries, material, direction) -> CatalogEntry | None
+def hardness_for(params, value) -> float          # inverse of log_lerp
+```
+
+Plain Python over per-frame facts the application already has, run from
+`MatterStudio._venue_frame` after the grip manager has decided who holds
+what. The director writes `hardness_target`, never `hardness`, so a hand that
+jumps still produces a continuous change in the material through the same
+smoothing every other input goes through. It is inert while the
+demonstration runs and whenever the synthetic hand is on stage.
+
+The free-hand mapping is wrist height across the stage's vertical extent with
+a 12% margin at each end, so a visitor does not have to reach the edge of the
+tracked volume to reach the end of the dial; nothing happens until something
+is held, so a hand reaching in to grab does not swing the dial on the way.
+The sweep starts from the dial's current value (phase from `asin`), covers
+the whole range in one period and stops where it is on release.
+
+The catalogue is names only: it never changes the material model. `nearest`
+compares on a log scale against the kind's headline quantity (Young's
+modulus for soft bodies, stretch stiffness otherwise) and `hardness_for`
+inverts `log_lerp`, clamping an entry outside the dial's range to its ends
+(`check_range` reports those at start-up). Built-in soft-body values are
+literature orders of magnitude; the cloth and grain values are the solver
+stiffnesses at which the shipped sheet and pile *read* as the named thing,
+and are documented as such.
+
+Text outside ASCII -- a Japanese prompt, a venue's material names -- is
+drawn by `render.text.LabelCache`: one PIL rasterisation per (string, size)
+into a small RGBA texture, drawn as a textured quad after the main overlay
+batch, bounded to 64 entries. `OverlayBatch.text` routes to it whenever a
+`LabelCache` is attached and the string is not ASCII, so the HUD and badges
+need no changes to show either.
+
 ## 5. `SolverState` device arrays
 
 `P` = total particles, `D` = distance constraints, `B` = bending constraints,
@@ -688,6 +736,7 @@ graph path and the plain path agree bitwise.
 | `P` | pause / resume physics |
 | `.` | single-step while paused |
 | `F` | toggle wind |
+| `M` / `N` | Step the dial to the next / previous catalogue material |
 | `D` | run the choreographed demonstration (`fctx.demo`): grab, lift, sweep the dial while holding, let go; loops until pressed again. On a camera source it drives only the dial |
 | `A` | sweep the hardness dial automatically, for demos and recordings |
 | `0` | jump the dial to its soft end |
@@ -741,6 +790,14 @@ in it.
 * `test_settings.py` — the configuration file round-trips exactly for every
   preset, sections override field by field, typos fail loudly and name the
   key, and the CLI layers file then flags with `--preset` winning.
+* `test_exhibit.py` — the free hand sets the dial only while the other hand
+  holds and maps the stage bottom/centre/top to 0/0.5/1; the sweep starts
+  where the dial is and stops on release; a free hand beats the sweep; the
+  coach says grab → hardness → release once, fades, repeats while stuck and
+  resets for the next visitor; visitors are counted by the gap rule; the
+  CSV carries every event and the report tool reads it back; every built-in
+  catalogue entry round-trips through `hardness_for`, M/N walk the list end
+  to end, and a bad venue catalogue says which key is wrong.
 * `test_resilience.py` *(GPU)* — a camera that dies mid-session is replaced
   by the synthetic hand and taken back when it returns; attract mode starts
   with nobody there and stops within `ATTRACT_WAKE_FRAMES` of a hand

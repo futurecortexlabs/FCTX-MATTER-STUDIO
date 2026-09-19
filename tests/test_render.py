@@ -1495,6 +1495,40 @@ def test_hud_badges(window: Window, bodies: list[BodyData],
     assert moved > 0.0005
 
 
+def test_unicode_labels(window: Window, bodies: list[BodyData],
+                        state: object) -> None:
+    """Text outside the ASCII atlas draws through the label cache, bounded."""
+    cfg = base_config(show_webcam=False)
+    plain = _render_once(window, cfg, bodies, state,
+                         toggles={"show_hud": False}, show_hud=False).astype(np.int16)
+    notes = [SimpleNamespace(text="親指と人差し指でつまんでみてください", alpha=1.0),
+             SimpleNamespace(text="~ シリコーンゴム", alpha=0.8)]
+    labelled = _render_once(window, cfg, bodies, state,
+                            toggles={"show_hud": False}, show_hud=False,
+                            notifications=notes).astype(np.int16)
+    err = window.ctx.error
+    record("unicode labels draw without GL error", err == "GL_NO_ERROR", err)
+    assert err == "GL_NO_ERROR"
+    changed = float((np.abs(plain - labelled).max(axis=2) > 6).mean())
+    ok = changed > 0.002
+    record("a Japanese prompt changes the frame", ok, f"{changed * 100:.2f}% of the frame")
+    assert ok
+
+    # The cache is keyed by string and size, reused, and bounded.
+    from fctx.render.text import LabelCache
+    cache = LabelCache(window.ctx, capacity=8)
+    tex, w, h = cache.get("つまむ", 24.0)
+    again = cache.get("つまむ", 24.0)
+    record("label cache reuses a string", again[0] is tex, f"{w}x{h}, font {cache.source}")
+    assert again[0] is tex and w > 4 and h > 4
+    for i in range(20):
+        cache.get(f"ラベル{i}", 24.0)
+    record("label cache is bounded", len(cache) <= 8, f"{len(cache)} entries after 21 strings")
+    assert len(cache) <= 8
+    cache.release()
+    assert len(cache) == 0
+
+
 def _grain_slab(radius: float = 0.0048, nx: int = 26, ny: int = 3,
                 nz: int = 26, centre=(0.0, 0.30, 0.0)) -> BodyData:
     """A dense raft of grains at the shipped grain radius.
@@ -1694,6 +1728,9 @@ class _RecordingBatch:
     def line(self, x0, y0, x1, y1, width, color) -> None:
         self.quads.append((min(x0, x1), min(y0, y1),
                            abs(x1 - x0), max(abs(y1 - y0), width)))
+
+    def measure(self, s, size_px) -> tuple[float, float]:
+        return self.atlas.measure(s, size_px)
 
     def text(self, s, x, y, size_px, color, *, align="left") -> float:
         w = len(s) * self.atlas.advance(size_px)
@@ -1897,6 +1934,7 @@ def main() -> int:
             ("camera limits", test_camera_limits),
             ("input", test_input_translation),
             ("badges", lambda: test_hud_badges(window, bodies, state)),
+            ("labels", lambda: test_unicode_labels(window, bodies, state)),
             ("hud layout", lambda: test_hud_layout_fits_the_window(window)),
             ("grain shadow", lambda: test_grain_contact_shadow(window)),
             ("timer owner", lambda: test_timer_owner_survives_another_release(
