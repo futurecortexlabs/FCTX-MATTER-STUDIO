@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it as below."
+title: "FCTX MATTER STUDIO: touchless sensory evaluation with GPU soft-matter physics and pseudo-haptics"
+authors:
+  - name: "FutureCortex Labs"
+version: 0.2.0
+date-released: 2026-09-30
+license: MIT
+repository-code: "https://github.com/futurecortexlabs/FCTX-MATTER-STUDIO"
+keywords:
+  - XPBD
+  - NVIDIA Warp
+  - soft body simulation
+  - hand tracking
+  - pseudo-haptics
+  - psychophysics
+  - sensory evaluation

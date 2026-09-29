@@ -5,12 +5,26 @@ on:
   pull_request:
 
 jobs:
-  cpu-tests:
-    # The GPU-bound files (solver, render, smoke, resilience) need CUDA and an OpenGL
-    # context and run on the developer's machine with tools/run_tests.py.
-    # Everything else -- geometry, colouring, tracking, filters, the material
-    # model, the choreography, the application's control logic -- runs here.
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: ruff
+        run: uvx ruff check src tests tools
+
+  cpu-tests:
+    # The GPU-bound files (solver, render, smoke, resilience, study app) need
+    # CUDA and an OpenGL context and run on a developer machine with
+    # tools/run_tests.py.  Everything else -- geometry, colouring, tracking,
+    # filters, the material model, the choreography, the venue layer, the
+    # pseudo-haptics logic, the study state machine and its analysis -- runs
+    # here, on both operating systems the studio ships for.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -18,9 +32,9 @@ jobs:
           python-version: "3.12"
       - name: install
         run: uv sync --frozen
-      - name: lint
-        run: uvx ruff check src tests tools
       - name: cpu tests
         env:
           FCTX_DEVICE: cpu
         run: uv run python tools/run_tests.py --cpu
+      - name: analysis CLI
+        run: uv run fctx-analyze --help

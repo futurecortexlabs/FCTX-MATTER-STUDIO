@@ -76,7 +76,7 @@ wheels = [
 
 [[package]]
 name = "fctx-matter-studio"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "glfw" },
@@ -89,9 +89,15 @@ dependencies = [
     { name = "warp-lang" },
 ]
 
+[package.optional-dependencies]
+figures = [
+    { name = "matplotlib" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "glfw", specifier = ">=2.7" },
+    { name = "matplotlib", marker = "extra == 'figures'", specifier = ">=3.8" },
     { name = "mediapipe", specifier = ">=0.10.18" },
     { name = "moderngl", specifier = ">=5.10" },
     { name = "numpy", specifier = ">=1.26" },
@@ -100,6 +106,7 @@ requires-dist = [
     { name = "pyglm", specifier = ">=2.7" },
     { name = "warp-lang", specifier = ">=1.7" },
 ]
+provides-extras = ["figures"]
 
 [[package]]
 name = "flatbuffers"

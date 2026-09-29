@@ -156,7 +156,7 @@ goto loop
 ```bash
 uv run python -m fctx --study studies/hardness_jnd.toml --check          # 本番前の確認
 uv run python -m fctx --config venue.toml --study studies/hardness_jnd.toml --kiosk
-uv run python tools/analyze_study.py studies/results/hardness_jnd.csv --csv jnd_summary.csv --plot jnd.png
+uv run fctx-analyze studies/results/hardness_jnd.csv --csv jnd_summary.csv --plot jnd.png
 ```
 
 **来場者の流れ**：手をかざす → 説明（3 秒）→ 左右の試料を両方押す → 「硬い方（好きな方）の上に手を
@@ -244,7 +244,7 @@ RTX 5070 Ti、1600×900、他の GPU アプリ常駐時の実測：
 2. `[render] bloom = false`
 3. `[render] msaa = 2`
 4. `[scene] cloth_resolution = 56`（既定 72）／`soft_resolution = 17`（既定 21）
-5. `[solver] substeps = 8`（既定 12。**材質の手触りは変わりません**——XPBD のコンプライアンス定式化はサブステップ数に依存しない設計です。変わるのは硬い端での収束）
+5. `[solver] substeps = 8`（既定 12。**材質は少し柔らかく見えるようになります**——XPBD の定式化自体はサブステップ数に依存しませんが、反復が有限なので収束度が下がります。実測で硬さ 0.3 の布の伸びは 12 → 6 サブステップで約 3 倍。スタディ中は変えないでください）
 
 `--profile 2` で 2 秒ごとに内訳が出ます。
 

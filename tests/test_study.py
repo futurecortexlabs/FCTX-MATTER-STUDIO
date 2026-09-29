@@ -10,13 +10,13 @@ from __future__ import annotations
 import csv
 import math
 import random
-import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
 from _harness import case, note, require, run
 
+from fctx import analysis as analyze_study  # noqa: E402
 from fctx.config import TrackingConfig
 from fctx.core.material import DEFAULT_MATERIALS
 from fctx.core.types import HandPose, MatterKind
@@ -31,9 +31,6 @@ from fctx.study import (
     load_study,
     study_from_dict,
 )
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import analyze_study  # noqa: E402
 
 SOFT = DEFAULT_MATERIALS[MatterKind.SOFT]
 TRACK = TrackingConfig()

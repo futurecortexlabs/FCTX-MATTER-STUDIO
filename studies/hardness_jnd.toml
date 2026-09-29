@@ -1,7 +1,7 @@
 # 弁別閾（JND）の測定：「どちらが硬い？」の二肢強制選択と 2-down-1-up 階段法。
 # 疑似触覚あり／なしを試行ごとに交互に出し、条件ごとに別の階段で閾値を測る。
 #   uv run python -m fctx --study studies/hardness_jnd.toml --kiosk
-#   uv run python tools/analyze_study.py studies/results/hardness_jnd.csv
+#   uv run fctx-analyze studies/results/hardness_jnd.csv
 [study]
 name = "hardness_jnd"
 protocol = "discrimination"

@@ -1,9 +1,25 @@
 [project]
 name = "fctx-matter-studio"
-version = "0.1.0"
-description = "Manipulate simulated matter with your bare hands. GPU XPBD physics (NVIDIA Warp) + real-time hand tracking."
+version = "0.2.0"
+description = "Touchless sensory evaluation of materials: GPU soft-matter physics (NVIDIA Warp XPBD), bare-hand webcam tracking, pseudo-haptics and a built-in psychophysics lab."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "FutureCortex Labs" }]
 requires-python = ">=3.12,<3.13"
+keywords = ["xpbd", "nvidia-warp", "soft-body", "cloth-simulation", "hand-tracking",
+            "mediapipe", "pseudo-haptics", "psychophysics", "sensory-evaluation", "hci"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+]
 dependencies = [
     "warp-lang>=1.7",
     "mediapipe>=0.10.18",
@@ -15,8 +31,17 @@ dependencies = [
     "pillow>=10.0",
 ]
 
+[project.optional-dependencies]
+figures = ["matplotlib>=3.8"]
+
+[project.urls]
+Repository = "https://github.com/futurecortexlabs/FCTX-MATTER-STUDIO"
+Documentation = "https://github.com/futurecortexlabs/FCTX-MATTER-STUDIO/blob/main/docs/ARCHITECTURE.md"
+
 [project.scripts]
+fctx = "fctx.__main__:main"
 fctx-matter-studio = "fctx.__main__:main"
+fctx-analyze = "fctx.analysis:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,137 @@
+{
+  "validation": {
+    "true": {
+      "on": 0.05,
+      "off": 0.15
+    },
+    "trials": 480,
+    "fit": {
+      "on": {
+        "threshold": 0.04731892869048548,
+        "ci": [
+          0.0400344693474888,
+          0.0536968299415081
+        ],
+        "staircase": 0.061009572189727426
+      },
+      "off": {
+        "threshold": 0.15899772150753386,
+        "ci": [
+          0.1345209958080439,
+          0.18792810217269898
+        ],
+        "staircase": 0.16829510103209666
+      }
+    },
+    "effect_ratio": 3.360129358539427,
+    "effect_ci": [
+      2.7264966173603313,
+      4.317747466518001
+    ],
+    "true_effect_ratio": 2.9999999999999996
+  },
+  "haptics": [
+    {
+      "hardness": 0.0,
+      "real_mm": 65.41658914938631,
+      "drawn_mm": 58.87508934912919,
+      "gain": 0.9
+    },
+    {
+      "hardness": 0.25,
+      "real_mm": 63.59523097967815,
+      "drawn_mm": 34.65266373655909,
+      "gain": 0.5438475715242183
+    },
+    {
+      "hardness": 0.5,
+      "real_mm": 63.56317066194088,
+      "drawn_mm": 21.03013217268309,
+      "gain": 0.3286335345030997
+    },
+    {
+      "hardness": 0.75,
+      "real_mm": 58.913563880937296,
+      "drawn_mm": 14.857829636177982,
+      "gain": 0.1985850551788124
+    },
+    {
+      "hardness": 1.0,
+      "real_mm": 57.71407272556149,
+      "drawn_mm": 10.160236243529415,
+      "gain": 0.12
+    }
+  ],
+  "substeps": {
+    "cloth": {
+      "6": 2.306993246078491,
+      "12": 0.7802221179008484,
+      "24": 0.22272752225399017,
+      "label": "mean edge strain (%)",
+      "max_deviation_from_12": 1.5267711281776428
+    },
+    "soft": {
+      "6": 0.9744169116020203,
+      "12": 0.9954947829246521,
+      "24": 0.9876112341880798,
+      "label": "height / rest height",
+      "max_deviation_from_12": 0.021077871322631836
+    }
+  },
+  "generated": "2026-09-30",
+  "performance": {
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "cpu": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "runs": {
+      "cloth": {
+        "fps": 223.0,
+        "frame_ms": 4.09,
+        "physics_ms": 1.19,
+        "render_ms": 1.02,
+        "particles": 5184,
+        "frame_ms_all": [
+          4.13,
+          4.4,
+          4.09
+        ]
+      },
+      "soft": {
+        "fps": 119.6,
+        "frame_ms": 8.05,
+        "physics_ms": 2.04,
+        "render_ms": 3.61,
+        "particles": 6056,
+        "frame_ms_all": [
+          8.05,
+          8.13,
+          13.8
+        ]
+      },
+      "grain": {
+        "fps": 161.7,
+        "frame_ms": 5.85,
+        "physics_ms": 1.42,
+        "render_ms": 2.16,
+        "particles": 24000,
+        "frame_ms_all": [
+          6.37,
+          5.85,
+          10.86
+        ]
+      },
+      "study (2 samples)": {
+        "fps": 109.2,
+        "frame_ms": 8.69,
+        "physics_ms": 2.15,
+        "render_ms": 3.86,
+        "particles": 4736,
+        "frame_ms_all": [
+          9.6,
+          8.69,
+          8.92
+        ]
+      }
+    },
+    "note": "headless 1600x900, 900 frames, synthetic hand, best of 3 runs on a shared workstation"
+  }
+}

@@ -1,358 +1,215 @@
 # FCTX MATTER STUDIO
 
-**触れない官能評価ラボ。Web カメラ一台で、素材の「硬さ」を比べて測る。**
+**English** | [日本語](README.ja.md)
 
-素材メーカーが「お客さまはこの二つのフォームの違いがわかるか」「三つのうちどれが好まれるか」を
-知りたいとき、ふつうは試作品を作ってパネル（評価者）を集めます。このソフトは、そのパネルを
-**シミュレーション上の試料で、試作なしに、展示会場で来場者を相手に**回します。
+[![ci](https://github.com/futurecortexlabs/FCTX-MATTER-STUDIO/actions/workflows/ci.yml/badge.svg)](https://github.com/futurecortexlabs/FCTX-MATTER-STUDIO/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
+![NVIDIA Warp](https://img.shields.io/badge/GPU-NVIDIA%20Warp-76b900.svg)
 
-| | 既存のやり方（試作＋パネル／TouchDesigner 等の展示） | FCTX MATTER STUDIO |
+**Touchless sensory evaluation of materials, with a webcam and your bare hands.**
+
+GPU soft-matter physics you can pinch, press and lift with bare hands in front
+of an ordinary webcam; a pseudo-haptic hand that is *held back* by hard
+materials; and a built-in psychophysics lab that runs blind A/B tests on
+simulated materials and tells you, with confidence intervals, what people can
+feel.
+
+<p align="center"><img src="docs/images/hero.gif" width="720" alt="Pinching a sheet and turning it from gossamer to sheet metal without letting go"></p>
+
+<p align="center"><sub>One sheet, one grip. The dial moves from gossamer to sheet metal while the
+hand is still holding it -- the fold, the swing and the drape all change,
+because the dial is Young's modulus, not a colour.</sub></p>
+
+---
+
+## Why this exists
+
+A materials company that wants to know *can customers tell these two foams
+apart?* or *which of these three do they prefer?* normally makes the foams and
+recruits a panel. This runs the panel on simulated samples instead -- at a
+trade-show booth, on visitors, with nothing to touch but air:
+
+| | Usual practice | FCTX MATTER STUDIO |
 |---|---|---|
-| 試料 | 実物を試作 | ヤング率を指定した仮想試料（自社カタログも可） |
-| 硬さの伝え方 | 実物に触る／展示では色や見た目 | **疑似触覚**：画面の手が硬さに応じて押し返される |
-| 回答 | 用紙・タブレット | **手をかざすだけ**（触らない・マウスなし） |
-| 実験計画 | 人手で割り付け | 二肢強制選択＋**適応型階段法**、左右と条件を自動で無作為化 |
-| 結果 | 集計は後で手作業 | **弁別閾・ヤング率のウェーバー比・Bradley–Terry 順位**を自動解析 |
-| 疑似触覚そのものの効果 | — | 試行ごとに on/off を交互に出し、**効果の大きさと信頼区間を同じ実験で測る** |
+| Samples | Physical prototypes | Simulated, specified by Young's modulus (or your own catalogue) |
+| Conveying hardness | Touch the real thing | **Pseudo-haptics**: the drawn hand is resisted by hard samples |
+| Answering | Paper or tablet | **Raise a hand over your choice** -- no touch, no mouse |
+| Design | Hand-assigned | 2AFC + **adaptive staircase**, sides and conditions randomised |
+| Results | Tabulated later | **JND, modulus Weber fraction, Bradley–Terry ranking**, automatically |
+| Does the illusion work? | -- | Measured **in the same run**: on/off interleaved, effect with a bootstrap CI |
 
-![study](docs/images/06-study.png)
+<p align="center"><img src="docs/images/06-study.png" width="720" alt="Study mode: two identical samples, a prompt, and a response gauge filling above the chosen side"></p>
 
-### 新しい点
+## Technical highlights
 
-1. **疑似触覚（pseudo-haptics）**。手が試料に触れると、画面に描く手を素材の硬さに応じて押し返します
-   （制御表示比の操作。Lécuyer ら 2000 年以来の研究手法）。GPU 上の実測で、硬い試料に 19 mm 押し込むと
-   画面の手は 2 mm しか沈まず、柔らかい試料では 66 mm に対して 59 mm 沈みます（接触の読み出しは非同期で、
-   有効にしてもフレーム時間は測定誤差の範囲：8.1–8.4 ms）。ソルバがぶつかる手も
-   同じ「押し返された手」なので、画面と物理が食い違いません。
-2. **ブラインド A/B 官能評価**。同じ形・同じ色の試料を左右に並べ、ダイヤルも素材名も隠します。違うのは
-   押したときの振る舞いだけです。来場者は両方を押してから、選んだ方の上に手を高くかざします（1.2 秒の
-   注視で確定）。
-3. **展示会でも科学的に回る**。来場者をまたいで一本の階段法を続け、再起動しても CSV から続きを
-   再開します。途中で立ち去った人の回答はそこまでで確定します。
-4. **疑似触覚が本当に効くかを測れる**。効く「はず」とは言いません。条件を交互に出し、
-   `threshold(off) / threshold(on)` とブートストラップ信頼区間で判定します。
+- **XPBD solver written from scratch in NVIDIA Warp** -- not `warp.sim`. Cloth
+  (stretch, shear, dihedral bending), soft bodies (stable Neo-Hookean
+  tetrahedra, Macklin & Müller 2021) and 24,000-grain granular matter are one
+  solver with different constraint sets, so a single scalar rewrites every
+  compliance in the scene mid-grab without rebuilding anything.
+- **Parallel Gauss–Seidel by graph colouring**, the substep loop captured as a
+  **CUDA graph** (dynamic values live in device arrays so the graph stays
+  valid), Jacobi-averaged particle contacts with count-faded SOR, a hash grid.
+- **Embedded render skin**: the drawn surface is a smooth fitted mesh bound to
+  eight incident tetrahedra per vertex by barycentric blending, so a coarse
+  lattice renders as a sphere, not a staircase.
+- **Bare-hand interaction**: MediaPipe landmarks → One-Euro filtering →
+  image-to-world projection → 21 capsule colliders per hand, swept across
+  substeps, speed-limited, faded in so a hand never materialises inside matter;
+  wrist-anchored grabs with palm-frame rotation so opening the fingers never
+  flings what they held.
+- **Pseudo-haptics** with a per-(hand, body) contact kernel read back through
+  **double-buffered pinned memory and CUDA events** -- zero measured frame cost.
+- **Custom ModernGL renderer**: HDR, MSAA, shadow maps with per-receiver bias,
+  SSAO, progressive bloom, ACES, a single-draw-call HUD with a CJK label cache,
+  CUDA–GL interop for zero-copy particle upload.
+- **Deterministic lockstep**: headless runs are bit-reproducible, which is what
+  the test suite and the video renderer stand on.
+- **Built for unattended operation**: camera hot-plug recovery, attract mode,
+  a resilient frame loop, scheduled restarts only when nobody is there,
+  a soak-test tool, visitor analytics.
 
-```bash
-uv run python -m fctx --study studies/hardness_jnd.toml --kiosk        # 弁別閾（どちらが硬い？）
-uv run python -m fctx --study studies/foam_preference.toml --kiosk     # 好み（どちらが好き？）
-uv run python tools/analyze_study.py studies/results/hardness_jnd.csv --plot jnd.png
+## Evidence
+
+Every number below is produced by [`tools/make_figures.py`](tools/make_figures.py)
+and stored in [`docs/figures/measurements.json`](docs/figures/measurements.json).
+
+<table>
+<tr>
+<td width="50%"><img src="docs/figures/haptics.png" alt="pseudo-haptic gain, configured vs measured"></td>
+<td><b>Pseudo-haptics through the real solver.</b> A hand pressed ~60 mm into
+the soft body at five hardnesses. Soft: drawn 59 of 65 mm (0.90, as
+configured). Hard: drawn 10 of 58 mm. The measured ratio follows the
+configured gain; at the hard end it reads a little high because the offset
+follows its target with a 30 ms time constant during a moving press.</td>
+</tr>
+<tr>
+<td><img src="docs/figures/validation.png" alt="psychometric recovery and staircases"></td>
+<td><b>The analysis recovers known truth.</b> Simulated visitors with known
+thresholds (0.050 with pseudo-haptics, 0.150 without) answer 480 trials through
+the real study state machine. Fitted: 0.047 [0.040, 0.054] and 0.159
+[0.135, 0.188]; effect ratio 3.36 [2.73, 4.32] against a true 3.00.</td>
+</tr>
+<tr>
+<td><img src="docs/figures/substeps.png" alt="material response vs substep count"></td>
+<td><b>An honest limit.</b> XPBD's compliance makes the <i>converged</i>
+material independent of the substep count, but one iteration per substep is
+not fully converged: a hanging sheet at hardness 0.3 shows 2.3% / 0.78% /
+0.22% edge strain at 6 / 12 / 24 substeps. A resting soft body stays within 2%.
+The default is 12; studies should not change it.</td>
+</tr>
+<tr>
+<td><img src="docs/figures/performance.png" alt="frame time per preset"></td>
+<td><b>Whole frames, not just physics.</b> Headless 1600×900, physics +
+rendering, best of three runs on a shared RTX 5070 Ti workstation: every
+configuration fits a 60 Hz frame with room to spare, including the
+two-sample study with pseudo-haptics on.</td>
+</tr>
+</table>
+
+## Quick start
+
+Windows with an NVIDIA GPU (CUDA 12 driver) and any webcam:
+
+```bat
+setup.bat
 ```
 
-解析の妥当性は、閾値が既知の模擬観察者で確かめています（真値 0.080 に対して推定 0.078、95% 区間
-[0.069, 0.092]。効果が 3 倍ある条件差は off/on = 3.81 [2.84, 4.69] で検出）。
-
-**まだ言えないこと**：人を相手にした検証はこれからです。このカメラ構成で疑似触覚が弁別を
-助けるかどうか、シミュレーション試料での判断が実物での判断とどれだけ一致するか（実物パネルとの
-突き合わせ）は、このツールで測るべき問いであって、結論ではありません。制約の全体は
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §9c と §10 にあります。
-
----
-
-## 土台：画面内の物質を、素手で操る
-
-カメラの前で手を動かすと、画面の中の布をつまめます。柔らかい物体を押せばへこみ、
-指を離せば揺れながら戻ります。マウスもコントローラも使いません。
-
-そして見せ場は、**物を掴んでいる最中に「硬さ」を連続的に変えられる**ことです。
-色が変わるだけではありません。同じ形のまま、たわみ方が変わり、手を離した後の
-揺れ方が変わり、床への落ち方が変わります。
-
-| 硬さ 6%「GOSSAMER」 | 硬さ 94%「SHEET METAL」 |
-|---|---|
-| ![soft cloth](docs/images/01-cloth-soft.png) | ![hard cloth](docs/images/02-cloth-hard.png) |
-
-**同じ布、同じソルバ、同じフレーム。動かしたのはダイヤルだけです。**
-面外の折れ幅は 0.124 m から 0.036 m に、垂れ下がりは床まで届く状態から
-ほぼ真っ直ぐに変わります。色はその結果を読みやすくしているだけで、
-形を決めているのはヤング率と曲げ剛性です。
-
-| 弾性体 | 粒体 24,000 |
-|---|---|
-| ![soft body](docs/images/03-soft.png) | ![granular](docs/images/04-grain.png) |
-
----
-
-## これは何か
-
-物理は全部ひとつのパーティクルソルバです。布も弾性体も粒体も別エンジンではなく、
-**同じ XPBD ソルバに違う拘束を掛けているだけ**です。だから「硬さ」という 1 つの
-スカラーが、シーン中の全拘束のコンプライアンス（＝剛性の逆数）をその場で書き換え
-られます。再構築も、シミュレーションの中断も要りません。
-
-コンプライアンスは物理量です。XPBD は解く際に `α̃ = α/Δt²` として畳み込むので、
-**サブステップ数を変えても材質の手触りは変わりません**。硬さダイヤルが動かして
-いるのはヤング率とポアソン比そのものであって、数値解法のごまかしではありません。
-
-ただしダイヤルの上端は文字どおりではありません。四面体 1 個が 1 回の投影で
-解ける剛性には離散化由来の上限があり、同梱の弾性体プリセットでは硬さ 0.4 付近
-からその上限に当たります。超えた分は四面体の辺拘束が担うので手応えは硬くなり
-続けますが、HUD の `E` は「要求値」であって実効値ではなく、最上端では立方体が
-静止形状より 22% 太って落ち着きます。測定値と理由は
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.4 と §10 に書いてあります。
-
-| 層 | 実装 |
-|---|---|
-| GPU 物理 | NVIDIA Warp 1.17 の自作 XPBD カーネル（`warp.sim` は使用しない／1.x で削除済み） |
-| 弾性体 | Stable Neo-Hookean 四面体（Macklin & Müller 2021）。ヤング率とポアソン比で駆動 |
-| 布 | 構造・せん断距離拘束 ＋ 二面角曲げ拘束 |
-| 接触 | 手＝カプセル列、空間ハッシュによる粒子間衝突、クーロン摩擦 |
-| 並列化 | グラフ彩色による並列 Gauss-Seidel ＋ CUDA Graph キャプチャ |
-| ハンドトラッキング | MediaPipe Hands（21 ランドマーク）＋ One-Euro フィルタ |
-| 描画 | ModernGL 自作パイプライン。PBR / シャドウ / SSAO / Bloom / ACES |
-
-詳細な設計と数式は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) にあります。
-
----
-
-## 動かす
-
-必要なもの: NVIDIA GPU（CUDA）、Python 3.12、ウェブカメラ（無くても動きます）。
+or by hand, on Windows or Linux:
 
 ```bash
 uv sync
-uv run python tools/download_models.py
-uv run python -m fctx
+uv run python tools/download_models.py     # MediaPipe hand model, sha256-checked
+uv run fctx --check                        # GPU, OpenGL, model, camera
+uv run fctx                                # free play: cloth (1-5 switch presets)
+uv run fctx --demo                         # the choreographed demonstration
+uv run fctx --source synthetic             # no camera: mouse-driven hand
 ```
 
-**まず見せ場を見る**（掴む → 持ち上げる → 持ったまま硬さを端から端へ → 離す、を布と弾性体で）:
+Run a study and analyse it:
 
 ```bash
-uv run python -m fctx --demo --source synthetic
+uv run fctx --study studies/hardness_jnd.toml --kiosk
+uv run fctx-analyze studies/results/hardness_jnd.csv --plot jnd.png
 ```
 
-`D` キーで実行中いつでも開始／停止できます。同じ振り付けを映像に落とすには:
+```
+DISCRIMINATION  (threshold = hardness-dial difference at 75% correct)
+  pseudo-haptics  on:  120 trials,  14 people, 78% correct
+      threshold 0.071 [0.058, 0.090]  staircase 0.066  -> modulus Weber fraction 72%
+  pseudo-haptics off:  120 trials,  14 people, 71% correct
+      threshold 0.118 [0.091, 0.160]  staircase 0.109  -> modulus Weber fraction 145%
+  pseudo-haptics effect: threshold off/on = 1.66 [1.18, 2.35]  -> helps
+```
+<sub>Output format only -- illustrative numbers, not a result.</sub>
+
+## What you can use it for
+
+- **Pre-screening materials** before making prototypes: which differences are
+  noticeable at all, which of a shortlist people prefer. Bring your own
+  catalogue (`--catalog materials.toml`, Young's modulus per entry).
+- **HCI and perception research**: pseudo-haptics, visual stiffness perception,
+  bare-hand interaction -- with a validated staircase, reproducible CSV logs and
+  deterministic replay of recorded hand motion (`--record` / `--source replay`).
+- **Exhibitions and teaching**: `--kiosk` runs unattended for days; the demo,
+  attract mode, visitor prompts (any language) and a daily report are built in.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    cam[webcam] --> mp[MediaPipe<br/>landmarks]
+    mp --> trk[HandTracker<br/>One-Euro, projection,<br/>track ids]
+    trk -->|real hands| hap[PseudoHaptics<br/>C/D ratio by hardness]
+    hap -->|displayed hands| sol
+    subgraph GPU [GPU · NVIDIA Warp]
+      sol[XPBD solver<br/>colored Gauss-Seidel<br/>CUDA graph] --> con[contact kernel<br/>per hand × body]
+    end
+    con -.->|async pinned readback| hap
+    con -.-> st[Study<br/>staircase, blinding,<br/>dwell answers]
+    st -->|per-sample hardness| sol
+    st --> csv[(CSV)] --> an[fctx-analyze<br/>fit, bootstrap,<br/>Bradley-Terry]
+    sol -->|CUDA-GL interop| ren[ModernGL renderer<br/>HDR, shadows, SSAO]
+```
+
+The design, the maths, every stability rule and the known limits (with
+measurements) are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Running an
+installation or a study: [docs/OPERATIONS.md](docs/OPERATIONS.md) (Japanese).
+
+## Limits, stated plainly
+
+- **Not yet validated on people.** Whether pseudo-haptics helps with a webcam
+  hand, and whether judgements on simulated samples match judgements on real
+  ones, are exactly what this tool measures -- they are not claims. Tying
+  results to products needs one panel with physical samples of known modulus.
+- **Stiffness ceiling.** Above ~0.4 on the soft dial the tetrahedra reach their
+  resolvable stiffness; ordering holds, the modulus ratio becomes nominal
+  (the analysis warns).
+- **Granular friction is weak** (position-based friction vanishes at rest), so
+  piles spread; the grain preset ships with a basin. Measured in ARCHITECTURE §10.
+- **NVIDIA GPU required** for physics and rendering; the tracking, study and
+  analysis code runs anywhere (that is what CI runs).
+
+## Tests
 
 ```bash
-uv run python tools/render_showcase.py            # docs/showcase.mp4, 1600x900 60fps H.264
+uv run python tools/run_tests.py          # 18 files, ~380 checks (GPU, ~4 min)
+uv run python tools/run_tests.py --cpu    # what CI runs on every push
 ```
 
-ヘッドレスのロックステップで走るので、どのマシンでもフレーム単位で同じ映像になります。
+Tests are named as the property they defend -- `a_hard_surface_holds_the_drawn_hand_back_and_a_soft_one_lets_it_sink`,
+`the_study_recovers_a_known_threshold`, `lockstep_makes_a_headless_run_reproducible`,
+`opening_the_fingers_does_not_fling_what_they_were_holding`.
 
-環境に問題がないか先に見たいとき:
+## Credits
 
-```bash
-uv run python -m fctx --check
-```
+- NVIDIA Warp (Apache-2.0), MediaPipe Hands (Apache-2.0; the model is
+  downloaded and hash-checked, not redistributed), ModernGL (MIT), OpenCV (Apache-2.0)
+- Macklin, Müller & Chentanez, *XPBD* (2016); Macklin et al., *Small Steps in
+  Physics Simulation* (2019); Macklin & Müller, *Stable Neo-Hookean* (2021)
+- Casiez, Roussel & Vogel, *1€ Filter* (2012); Lécuyer et al., *pseudo-haptic
+  feedback* (2000); Levitt, *transformed up-down methods* (1971); Hunter,
+  *MM algorithms for Bradley–Terry* (2004)
 
-カメラが無い場合は自動的に**合成ハンド**に切り替わります。マウスで手を動かし、
-クリックまたはスペースでつまめます。デモも回帰テストもこれで完結します。
-
-```bash
-uv run python -m fctx --source synthetic
-```
-
-### よく使うコマンド
-
-```bash
-uv run python -m fctx --preset soft          # 弾性体
-uv run python -m fctx --preset banner        # 風になびく旗
-uv run python -m fctx --preset grain         # 粒体
-uv run python -m fctx --hardness 0.9         # 硬い状態から開始
-uv run python -m fctx --record take01.fhr    # 手の動きを記録
-uv run python -m fctx --source replay --replay take01.fhr
-uv run python -m fctx --benchmark            # ヘッドレス計測
-```
-
----
-
-## 実測値
-
-RTX 5070 Ti / Warp 1.17 / 90 Hz × 12 サブステップ（実効 1080 Hz）。
-1 フレームの予算は 11.1 ms です。
-
-| プリセット | 粒子 | 拘束 | physics | render | fps |
-|---|---:|---:|---:|---:|---:|
-| cloth 72×72 | 5,184 | 30,246 | **1.0 ms** | 1.3 ms | 207 |
-| banner 88×88 | 7,744 | 45,414 | 1.1 ms | 1.3 ms | 198 |
-| soft sphere 21³ | 6,056 | 57,599 | 2.2 ms | 4.5 ms | 96 |
-| granular | 24,000 | 26,800 接触 | 1.1 ms | 1.5 ms | 199 |
-
-（`--benchmark` の実測。Blender と Isaac Sim が常駐した状態の値で、GPU が空いていると
-cloth は 300 fps 近くまで出ます。render は GL タイマークエリによる GPU 実時間です。）
-
-ダイヤルが実際に効いていることの数値的裏付け（すべて回帰テストで検証）:
-
-| 物質 | 硬さ 0 | 硬さ 1 |
-|---|---|---|
-| 布・面外の折れ幅 | 0.124 m | 0.036 m |
-| 弾性体・ヤング率 | 6 kPa | 12 MPa（3.3 桁） |
-| 弾性体・垂れ量 | 249.5 mm | 220.2 mm |
-| 粒体・安息角 / 広がり | 9.9° / 0.39 m | 3.3° / 1.14 m |
-
-弾性体の描画表面は物理格子ではありません。ボクセル格子は well-conditioned の
-まま残し、等値面上の「理想位置」を各頂点が接する最大 8 個の四面体に barycentric で
-埋め込み、その平均（線形ブレンドスキニング）として毎フレーム再構成しています。
-同梱の球で表面の半径ばらつきが **6.0 mm → 0.12 mm（50 倍）**、要素境界の折れも
-消え、物理側は一切変えていません。
-
-HUD の `E` は正直です。四面体 1 個が 1 サブステップで解ける剛性には離散化上の
-上限があり、それを超えるとソルバは要素を柔らかくして辺拘束に残りを担わせます。
-その時 HUD は `E 125kPa (tets 17.7kPa)` のように**実際に四面体が担っている値**を
-併記します。
-
----
-
-## 実務で使う（展示・授業・実験室）
-
-会場ごとの設定は TOML ファイルに、常設は `--kiosk` に集約してあります。
-詳細は **[docs/OPERATIONS.md](docs/OPERATIONS.md)**（機材・設置・キャリブレーション・
-トラブルシューティング）。
-
-```bash
-setup.bat                                          # 新品 PC の初回セットアップ（uv→依存→モデル→check）
-uv run python tools/calibrate.py --camera 0        # 会場の手のサイズと位置を計測
-uv run python -m fctx --dump-config > venue.toml   # 既定値を書き出して編集
-uv run python -m fctx --config venue.toml --check  # 設定ファイルと機材を本番前に確認
-uv run python -m fctx --config venue.toml --kiosk  # 常設モード
-run_kiosk.bat                                      # 落ちても再起動する監視ループ
-uv run python tools/soak.py --minutes 45           # 常設前のソークテスト（メモリの増加量を出す）
-```
-
-`--kiosk` はフルスクリーン、**アトラクトモード**（20 秒無人で自動デモ、手が映れば即復帰）、
-**カメラ切断からの自動復帰**（3 秒ごとに再接続）、**フレーム耐性**（例外をログしてシーンを
-リセットし続行）、**定期再起動**（12 時間後、無人になった瞬間に正常終了して監視ループが立て直す）、
-**コーチ**（来場者への短い案内、日本語可）、**記録**（`logs/events.csv` → `tools/report.py` で日報）を
-同時に有効にします。
-
-来場者はマウスに触りません：**片手で持ったまま、もう片方の手を上げ下げすると硬さが変わります**
-（片手だけの会場は「持っている間は自動で往復」に切替可）。HUD にはダイヤル位置に最も近い素材名
-（内蔵カタログ、または自社素材の `materials.toml`）が出ます。設定ファイルのタイポは起動時にキー名を挙げて
-エラーになります。
-
----
-
-## 操作
-
-| 入力 | 動作 |
-|---|---|
-| **ホイール** / `[` `]` | **硬さダイヤル**（押しっぱなしで連続変化。`-` `=` と `↑` `↓` も同じ） |
-| `D` | **振り付けデモ**：掴む→持ち上げ→保持したまま硬さ掃引→離す（合成ハンド時。カメラ時はダイヤルのみ） |
-| `Z` / `X` | スタディ中：左／右をスタッフが代理回答 |
-| `A` 自動スイープ（デモ・録画用） / `0` 一番柔らかい端へ | |
-| `1`–`5` | プリセット切替（cloth / banner / soft / cube / grain） |
-| 右ドラッグ | カメラ回転 / `Ctrl`+ホイール ズーム |
-| `R` 再構築 / `P` 一時停止 / `.` コマ送り | |
-| `H` HUD / `W` カメラ映像 / `K` 手の骨格 / `G` ワイヤフレーム / `F` 風 | |
-| `F9` 録画 / `F12` スクリーンショット / `F11` 全画面 / `Esc` 終了 | |
-| （合成ハンド）マウス移動・左クリック / `Space` つまむ・`Q`/`E` 奥行き・`C` 握る | |
-
----
-
-## 設計上の判断
-
-**なぜ `warp.sim` を使わないのか。** Warp 1.x で削除されているからです。距離拘束、
-二面角、Neo-Hookean、接触、彩色スケジューリングはすべて自前の `@wp.kernel` です。
-これは制約ではなく、仕様書が言う「自然な手操作との統合部分は独自開発」の中身そのもの
-です。
-
-**なぜ反復回数ではなくサブステップなのか。** XPBD は「1 ステップ × 12 反復」より
-「12 サブステップ × 1 反復」の方が圧倒的に収束します（Macklin et al. 2019）。
-既定は 90 Hz × 12 サブステップ、つまり実効 1080 Hz です。
-
-**なぜグラフ彩色なのか。** 同じ粒子を共有する 2 つの拘束を同一カーネルで並列に
-解くと競合し、結果が非決定的になります。彩色すれば色ごとに競合ゼロで並列投影でき、
-Gauss-Seidel の収束を保ったまま GPU を使い切れます。`greedy_color` は構築順と
-次数降順の 2 通りを試して色数の少ない方を採用します（布グリッドでは構築順が勝ち、
-四面体格子では次数降順が勝つことがある）。同梱の布 72×72 で距離拘束 8 色、
-曲げ拘束 11 色です。
-
-**なぜ One-Euro フィルタなのか。** ランドマークが 60 Hz で 3 mm 揺れると、それは
-布に 0.18 m/s の速度インパルスを毎フレーム注入することになります。物理が正しくても
-振動して見えます。One-Euro は静止時に強く、高速移動時にほぼ透明という、ここに必要な
-トレードオフそのものです。
-
-**なぜ掴みがコンプライアント拘束なのか。** 位置の直接代入にすると、手が速く動いた
-瞬間に粒子が床や他の物体を貫通します。柔らかい拘束なら、引っ張れば伸びて、離せば
-速度が残る——つまり投げられます。
-
-**なぜ掴みにヒステリシスが要るのか。** 閾値が 1 つだと、静止した手でも毎秒数回
-「掴む／離す」が入れ替わります。開始閾値と解放閾値を分け、さらに短い保持時間を入れる
-だけで、「物を持ち上げた」という感覚になります。
-
----
-
-## 最初に作る範囲について
-
-仕様書が求めた中心は**布 1 枚と柔らかい物体 1 個の反応と安定性**で、磨き込みの
-対象もそこです。液体も破壊も入れていません。
-
-ただし実際に入っている範囲は仕様書より広い、と正直に書いておきます。プリセットは
-7 つ（cloth / banner / drape / soft / cube / torus / grain）あり、粒体は
-「パーティクルソルバのついで」ではありません。専用のビルダと材質、粒体のためだけに
-ソルバと衝突カーネルに足した円筒バシン（`basin_radius` / `basin_height`）、粒体
-プリセット専用のトラッキング体積、点スプライト描画パスを持ち、接触の Jacobi 平均と
-接触数フェードの過緩和は 24,000 粒の山があるから存在します。描画も
-PBR / シャドウ / SSAO / 6 段ブルーム / ACES まで入った自作パイプラインで、
-リポジトリ中で最大のパッケージです。
-
-安定性は機能要件として扱い、`docs/ARCHITECTURE.md` §7 に 9 項目のルールとして
-明文化し、テストで検証しています。
-
----
-
-## テスト
-
-```bash
-uv run python tools/run_tests.py            # 全部
-uv run python tools/run_tests.py --cpu      # GPU 不要なものだけ
-```
-
-カメラ無しで全て走ります。物理のテストは「NaN が出ない」だけでなく、
-**硬い方が柔らかい方より伸びない**という見せ場の主張そのものを数値で検証します。
-
----
-
-## ライセンスと出典
-
-- NVIDIA Warp — GPU カーネル JIT（Apache-2.0）
-- MediaPipe Hands — ランドマーク推定（Apache-2.0）。モデルは配布物に含めず、
-  `tools/download_models.py` が公式バケットから取得し sha256 を検証します。
-- Macklin, Müller, Chentanez, *XPBD* (2016)
-- Macklin et al., *Small Steps in Physics Simulation* (2019)
-- Macklin & Müller, *A Constraint-based Formulation of Stable Neo-Hookean Materials* (2021)
-- Casiez, Roussel, Vogel, *1€ Filter* (2012)
-
----
-
-<details>
-<summary><b>English summary</b></summary>
-
-Move your bare hands in front of a webcam and the matter on screen answers.
-Pinch a sheet of cloth and it creases under your fingers. Push a soft body and
-it dents, then wobbles back when you let go.
-
-The showpiece: **change the hardness continuously while you are still holding
-the object.** Not just its colour — the same shape stops folding like jelly and
-starts folding like rubber, wobbles differently after release, and hits the
-floor differently.
-
-Everything on screen is one particle system. Cloth, soft bodies and granular
-matter are not three engines; they are one XPBD solver running different
-constraint sets over the same buffers. "Hardness" is a single scalar that
-rewrites the compliance of every constraint in the scene, live, mid-grab.
-Because compliance is physical and XPBD folds it in as `α̃ = α/Δt²`, the feel of
-the material does not change when the solver takes more or fewer substeps. The
-top of the dial is not literal, though: one tetrahedron can only resolve so
-much stiffness per projection, the shipped soft presets reach that around
-hardness 0.4, and past it the extra hardness is carried by the tet edge
-constraints rather than by the Neo-Hookean pair — measured in ARCHITECTURE
-§6.4 and §10.
-
-Custom Warp kernels (no `warp.sim` — it was removed in Warp 1.x): XPBD distance
-and dihedral bending constraints, stable Neo-Hookean tetrahedra driven by
-Young's modulus and Poisson's ratio, capsule and spatial-hash contact with
-Coulomb friction, graph-coloured parallel Gauss-Seidel, CUDA graph capture.
-MediaPipe hand tracking with One-Euro filtering. A hand-written ModernGL
-pipeline: PBR, shadows, SSAO, progressive bloom, ACES.
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design, the
-maths, and the stability rules.
-
-```bash
-uv sync && uv run python tools/download_models.py
-uv run python -m fctx --check
-uv run python -m fctx                      # live camera
-uv run python -m fctx --source synthetic   # no camera needed
-```
-
-</details>
+MIT licensed. If you use it in research, see [CITATION.cff](CITATION.cff).

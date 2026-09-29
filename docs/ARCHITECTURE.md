@@ -20,8 +20,9 @@ constraint sets over the same buffers. That is what makes the showpiece
 possible: "hardness" is a single scalar that rewrites the *compliance* of every
 constraint in the scene, live, mid-grab, without rebuilding anything and
 without touching the numerics. Compliance is physical (it is 1/stiffness, and
-XPBD folds it into the solve as `α̃ = α/Δt²`), so the feel of the material does
-not change when the solver takes more or fewer substeps.
+XPBD folds it into the solve as `α̃ = α/Δt²`), so the *converged* material does
+not depend on the substep count. The solve is not fully converged -- one
+iteration per substep -- so in practice fewer substeps read softer: measured by `tools/make_figures.py substeps`: a hanging sheet at hardness 0.3 shows 2.3% / 0.78% / 0.22% mean edge strain at 6 / 12 / 24 substeps, a resting soft body stays within 2% of its height.
 
 ---
 
@@ -503,7 +504,7 @@ order), so a scheduled restart continues rather than restarting. The
 condition alternates within a participant, starting on a counterbalanced
 side. Preference runs every ordered pair once per participant, shuffled.
 
-`tools/analyze_study.py` reads the CSV: staircase threshold (geometric mean
+`fctx.analysis` (`fctx-analyze`) reads the CSV: staircase threshold (geometric mean
 of the last reversals), a 2AFC logistic fit in log delta by grid maximum
 likelihood on per-level counts, its 75% point with a 400-sample bootstrap
 interval, the Weber fraction of the *nominal* modulus `(E_hard/E_soft)^d − 1`,
@@ -692,8 +693,8 @@ count. The ceiling rises with *coarser* elements and with more substeps — the
 
 This pair is *why* the hardness dial is a material dial rather than a fudge
 factor: `μ` and `λ` come straight from Young's modulus and Poisson's ratio,
-and the compliance formulation keeps the feel independent of `dt` and of the
-substep count. Read the ceiling above for where the elements stop being able
+and the compliance formulation keeps the converged material independent of
+`dt` and of the substep count (the unconverged residual is measured in §1). Read the ceiling above for where the elements stop being able
 to deliver what the dial asks for.
 
 ### 6.5 Capsule contact
@@ -724,8 +725,9 @@ The brief asks for responsiveness and stability before feature count, so these
 are requirements, not suggestions:
 
 1. **Substeps over iterations.** 12 substeps × 1 iteration beats 1 × 12.
-2. **Compliance, never stiffness multipliers.** Guarantees the feel is
-   independent of `dt` and of the substep count.
+2. **Compliance, never stiffness multipliers.** Makes the converged material
+   independent of `dt` and of the substep count; what remains is convergence,
+   which is why rule 1 exists.
 3. **Positional collision response only.** Contacts move positions and let
    `finalize` derive the velocity. A hand that teleports cannot inject energy.
 4. **Correction clamp.** No single constraint may move a particle more than

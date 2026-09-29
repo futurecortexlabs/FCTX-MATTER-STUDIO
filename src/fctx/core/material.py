@@ -14,9 +14,10 @@ module maps ``hardness`` in [0, 1] onto real material constants:
 
 and then converts those into the XPBD *compliance* values the solver wants.
 Compliance is the inverse of stiffness, and XPBD divides it by dt^2 internally,
-which is exactly why the feel of the material does not change when the solver
-runs more or fewer substeps.  Sliding the dial changes the material; it never
-changes the numerics.
+which is why the *converged* material does not depend on the substep count.
+The solve runs one iteration per substep and is not fully converged, so fewer
+substeps still read softer (measured in ``tools/make_figures.py substeps``).
+Sliding the dial changes the material; it never changes the numerics.
 
 References
 ----------
@@ -239,7 +240,7 @@ class Material:
 
     The ``*_compliance`` fields are XPBD compliances: ``alpha = 1 / k``.  The
     solver divides them by ``dt^2`` per substep, which is what makes the
-    behaviour independent of the substep count.
+    converged behaviour independent of the substep count.
     """
 
     hardness: float
