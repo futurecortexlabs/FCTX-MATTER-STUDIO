@@ -7,6 +7,10 @@ and no camera.
 
 from __future__ import annotations
 
+import dataclasses
+
+import numpy as np
+
 from ..config import SceneConfig
 from ..core.material import DEFAULT_MATERIALS, MaterialParams
 from ..core.types import BodyData, MatterKind
@@ -18,6 +22,7 @@ from .softbody import build_soft_body
 
 __all__ = [
     "build_scene",
+    "build_samples",
     "build_cloth",
     "build_soft_body",
     "build_granular",
@@ -47,3 +52,29 @@ def build_scene(scene: SceneConfig) -> list[BodyData]:
         raise ValueError(f"no builder for matter kind {kind!r}") from None
     params: MaterialParams = DEFAULT_MATERIALS[kind]
     return [builder(scene, params)]
+
+
+def build_samples(scene: SceneConfig, count: int = 2, spacing: float = 0.34
+                  ) -> list[BodyData]:
+    """``count`` identical bodies of ``scene.kind`` side by side along x.
+
+    For comparing materials: every sample is the same geometry, built once
+    and translated, so the only thing that can differ between them is the
+    material the solver is given per body -- which is what a blind
+    comparison needs.  Sample 0 is the leftmost.
+    """
+    if count < 1:
+        raise ValueError(f"build_samples needs at least one sample, got {count}")
+    template = build_scene(scene)
+    if len(template) != 1:
+        raise ValueError("build_samples expects a scene of exactly one body")
+    base = template[0]
+    out: list[BodyData] = []
+    for i in range(count):
+        x = (i - 0.5 * (count - 1)) * float(spacing)
+        pos = np.array(base.positions, dtype=np.float32, copy=True)
+        pos[:, 0] += np.float32(x)
+        body = dataclasses.replace(base, positions=pos, name=f"{base.name}_{i}")
+        body.validate()
+        out.append(body)
+    return out

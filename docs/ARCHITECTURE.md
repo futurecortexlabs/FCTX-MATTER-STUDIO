@@ -434,6 +434,82 @@ batch, bounded to 64 entries. `OverlayBatch.text` routes to it whenever a
 `LabelCache` is attached and the string is not ASCII, so the HUD and badges
 need no changes to show either.
 
+### 4.7 `fctx.haptics` and `fctx.study` — measuring perception
+
+```python
+class PseudoHaptics:
+    def update(self, poses, contacts: dict[int, HandContact], hardness: list[float],
+               held: set[int], dt) -> list[HandPose]        # the hands to draw and simulate
+    def gain(self, hardness) -> float                       # displayed / real press depth
+
+XPBDSolver.hand_contacts() -> (count[h, b], normal_sum[h, b, 3], position_sum[h, b, 3])
+
+class Study:
+    def update(self, poses, touching: set[int], dt, key: int | None) -> None
+    hardness: list[float]   # per sample, what the app evaluates materials at
+    condition: str          # "on" | "off": pseudo-haptics for this trial
+    prompt, panels, reset_scene, phase
+build_samples(scene, count, spacing) -> list[BodyData]      # identical, translated
+```
+
+**Pseudo-haptics** is a control/display-ratio manipulation. The frame is:
+tracker poses (real) → `PseudoHaptics.update` with *last* frame's contacts →
+displayed poses → `set_hands` and the grip manager → step → `compute_normals`
+→ `hand_contacts` (a kernel over particles × the hand's 21 capsules,
+counting each particle once per hand, accumulating per (hand slot, body)
+count, surface-normal sum and position sum) → next frame. Contact onset
+anchors the displayed palm; the patch normal, oriented toward the hand, is
+the push-back direction; real depth past the anchor `d` becomes displayed
+depth `g(h)·d` with `g` log-interpolated from `soft_gain` (0.9) to
+`hard_gain` (0.12) by the *pressed body's* hardness. The hand is translated
+rigidly, so sideways motion is untouched; the offset is capped at
+`max_offset` and relaxes when the press ends or the hand grabs. The solver
+collides with the displayed hand, so a hard sample under a held-back hand
+is also indented less: picture and physics agree.
+
+The contact report is read back asynchronously (`hand_contacts_async`):
+the kernel and a copy into one of two pinned host buffers are queued after
+the step, and the report used is the one queued the frame before, whose
+event has long fired. A synchronous readback made the CPU wait for the
+whole step every frame -- 121 → 95 fps on the soft preset; the async one
+measures 8.1–8.4 ms per frame with pseudo-haptics on or off. The price is
+one more frame of latency on contact onset, so the anchor lands a few
+millimetres into the surface. A reset, or a frame with no hand, discards
+the in-flight report (`discard_contacts`) so a new press is never anchored
+to an old one. Against a hard surface the held-back hand sits right at the
+matter and the count flickers; a press that is still deep survives six
+times `release_frames` of missing contact.
+
+**The study** is a per-frame state machine: WAITING → (a hand for 0.5 s)
+INTRO → EXPLORE (both samples touched for `touch_min`, at least
+`explore_min` in all) → RESPOND (an open, non-pinching palm above
+`respond_height` of the stage and beyond `respond_x` either side, held for
+`dwell`) → RECORDED → next trial or DONE → (hands gone 2 s) WAITING.
+`session_gap` seconds without hands in any active phase ends the
+participant; rows already written stand. Each new trial sets
+`reset_scene`, and the app resets the solver, the grips and the haptics, so
+every comparison starts from undisturbed matter.
+
+Blinding is enforced by the app, not requested of the operator: in study
+mode every sample gets `STUDY_LOOK` (one colour, gloss and translucency),
+the HUD is off, attract mode and the demonstration are off, the director and
+coach are off, and the preset, demo and catalogue keys are ignored. Z and X
+answer left and right for staff.
+
+Discrimination draws `delta` from an n-down-1-up staircase per condition,
+the harder sample on a seeded-random side; with `staircase_scope = "study"`
+the staircases are replayed from the CSV at start-up (`correct` in file
+order), so a scheduled restart continues rather than restarting. The
+condition alternates within a participant, starting on a counterbalanced
+side. Preference runs every ordered pair once per participant, shuffled.
+
+`tools/analyze_study.py` reads the CSV: staircase threshold (geometric mean
+of the last reversals), a 2AFC logistic fit in log delta by grid maximum
+likelihood on per-level counts, its 75% point with a 400-sample bootstrap
+interval, the Weber fraction of the *nominal* modulus `(E_hard/E_soft)^d − 1`,
+the off/on threshold ratio with a bootstrap interval, Bradley–Terry
+strengths by MM, side bias and response times.
+
 ## 5. `SolverState` device arrays
 
 `P` = total particles, `D` = distance constraints, `B` = bending constraints,
@@ -737,6 +813,7 @@ graph path and the plain path agree bitwise.
 | `.` | single-step while paused |
 | `F` | toggle wind |
 | `M` / `N` | Step the dial to the next / previous catalogue material |
+| `Z` / `X` | Study mode: answer left / right (staff override) |
 | `D` | run the choreographed demonstration (`fctx.demo`): grab, lift, sweep the dial while holding, let go; loops until pressed again. On a camera source it drives only the dial |
 | `A` | sweep the hardness dial automatically, for demos and recordings |
 | `0` | jump the dial to its soft end |
@@ -798,6 +875,24 @@ in it.
   CSV carries every event and the report tool reads it back; every built-in
   catalogue entry round-trips through `hardness_for`, M/N walk the list end
   to end, and a bad venue catalogue says which key is wrong.
+* `test_haptics.py` — the gain is geometric in hardness; a 4 cm press
+  shows as 36 / 13 / 5 mm at hardness 0 / 0.5 / 1; only the pressed body's
+  hardness counts; sideways motion passes through; backing out and
+  grabbing both release; the whole hand moves rigidly and never past
+  `max_offset`.
+* `test_study.py` — a simulated observer with a known threshold (0.080)
+  answers 240 trials and the staircase (0.072) and the fit (0.078, 95%
+  [0.069, 0.092]) recover it; a threefold condition difference is detected
+  (off/on 3.81 [2.84, 4.69]); conditions alternate and are counterbalanced;
+  a restart replays the staircase exactly; answers need a dwell above the
+  chosen side from an open hand and both samples explored; walking away ends
+  the session; preference covers every ordered pair and Bradley–Terry
+  recovers the true order; bad study files name the key.
+* `test_study_app.py` *(GPU)* — two samples, one look, no HUD, keys cannot
+  take over; a staff-answered study writes both conditions to CSV with
+  pseudo-haptics following the condition; through the real solver a press
+  on the hard sample is drawn at 2 mm of 19 mm and on the soft one at 59 of
+  66, attributed to the right sample; free play still runs on every preset.
 * `test_resilience.py` *(GPU)* — a camera that dies mid-session is replaced
   by the synthetic hand and taken back when it returns; attract mode starts
   with nobody there and stops within `ATTRACT_WAKE_FRAMES` of a hand
@@ -893,6 +988,33 @@ irrelevant.
 
 `--kiosk` is the bundle: fullscreen, `resilient`, `idle_demo = 20`,
 `max_uptime = 12`.
+
+---
+
+## 9c. What the study can and cannot claim
+
+* **Pseudo-haptics is a hypothesis here, not a feature claim.** The C/D
+  manipulation is established in the literature with mice, pens and VR
+  hands; whether it helps with a webcam hand at this latency is exactly what
+  the interleaved on/off staircases measure. Until a real panel has been
+  run, report it as "measured: …" or not at all.
+* **Simulated judgements are not product judgements until validated.** A
+  study on simulated foams says what people can tell apart *in the
+  simulation*. Tying that to real products needs one panel with physical
+  samples of known modulus and the same protocol, compared threshold for
+  threshold.
+* **The Weber fraction is of the nominal modulus.** Above about 0.4 on the
+  soft dial the tetrahedra reach their resolvable stiffness ceiling (§6.4)
+  and the edge constraints carry the rest: ordering is preserved, the
+  modulus ratio is not. Keep references and comparisons below that
+  (the shipped JND example uses 0.30) or read the ratio as nominal.
+* **Rest shape can give the answer away.** A softer sample sags more under
+  its own weight. At the shipped reference the difference is millimetres,
+  but a very soft reference makes it visible without touching.
+* **Press from above.** The push-back works along any contact normal, but
+  webcam depth (toward the camera) is the weakest tracked axis, so a press
+  measured along it is noisy. The samples are placed to be pressed
+  downward, which is image-vertical and well tracked.
 
 ---
 

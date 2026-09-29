@@ -458,6 +458,8 @@ class Renderer:
         self.atlas = TextAtlas(self.ctx, px=44)
         self.overlay = OverlayBatch(self.ctx, self.library, self.atlas)
         self.overlay.labels = LabelCache(self.ctx)
+        #: Response targets drawn over everything (the study sets these).
+        self.panels: list = []
         self.hud = Hud()
 
     # -- size-dependent resources -----------------------------------------
@@ -1060,6 +1062,8 @@ class Renderer:
             self.hud.build(batch, (width, height), materials, stats, hud_lines,
                            hardness=hardness)
         self.hud.badges(batch, (width, height), notifications, paused)
+        if self.panels:
+            self.hud.panels(batch, (width, height), self.panels)
 
         self._last_preview_tex = tex
         self._last_overlay_count = len(batch)

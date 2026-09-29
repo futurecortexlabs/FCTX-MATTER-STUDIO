@@ -59,6 +59,10 @@ examples
                    help="a [[material]] catalogue naming what the dial shows")
     g.add_argument("--coach", action=argparse.BooleanOptionalAction, default=None,
                    help="show visitor prompts (kiosk: on)")
+    g.add_argument("--study", type=Path, metavar="TOML",
+                   help="run a blind sensory-evaluation study (see studies/)")
+    g.add_argument("--haptics", action=argparse.BooleanOptionalAction, default=None,
+                   help="pseudo-haptics: the drawn hand resists pressing (default on)")
 
     g = p.add_argument_group("scene")
     g.add_argument("--preset", choices=PRESETS, default=None,
@@ -277,6 +281,9 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         resilient=resilient,
         max_uptime=max_uptime,
         exhibit=exhibit,
+        study=args.study if args.study is not None else cfg.study,
+        haptics=(cfg.haptics if args.haptics is None
+                 else rep(cfg.haptics, enabled=bool(args.haptics))),
         log_file=args.log_file or cfg.log_file,
         max_frames=frames,
         screenshot=args.screenshot,
@@ -310,7 +317,7 @@ def _silence_opencv() -> None:
 
 
 def check_environment(verbose: bool = True,
-                      config: Path | None = None) -> int:
+                      config: Path | None = None, study: Path | None = None) -> int:
     """Report on the GPU, OpenGL, the model pack, the camera and the config file."""
     ok = True
 
@@ -404,6 +411,22 @@ def check_environment(verbose: bool = True,
             line("[ok]", f"config {config} ({cfg.scene.kind.name.lower()}, "
                          f"camera {cfg.tracking.camera_index}, "
                          f"source {cfg.tracking.source})")
+    if study is not None:
+        from .study import StudyError, load_study
+
+        try:
+            sc = load_study(study)
+            from .config import TrackingConfig
+            from .core.material import DEFAULT_MATERIALS
+            from .core.types import MatterKind
+            from .study import Study
+            Study(sc, DEFAULT_MATERIALS[MatterKind[sc.kind.upper()]], TrackingConfig())
+        except StudyError as exc:
+            ok = False
+            line("[!!]", f"study: {exc}")
+        else:
+            line("[ok]", f"study {sc.name} ({sc.protocol}, {sc.trials} trials each) "
+                         f"-> {sc.output}")
     print("\n" + ("ready." if ok else "not ready -- fix the [!!] lines above."))
     return 0 if ok else 1
 
@@ -411,7 +434,7 @@ def check_environment(verbose: bool = True,
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.check:
-        return check_environment(args.verbose, config=args.config)
+        return check_environment(args.verbose, config=args.config, study=args.study)
 
     try:
         cfg = config_from_args(args)

@@ -272,6 +272,34 @@ class SceneConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class HapticsConfig:
+    """Pseudo-haptics: the displayed hand resists pressing (see :mod:`fctx.haptics`)."""
+
+    enabled: bool = True
+    #: Displayed press depth per unit of real press depth at hardness 0 and
+    #: 1.  1 is "the hand goes where you put it"; the hard end holds the
+    #: drawn hand at an eighth of the real depth, which reads as a wall.
+    soft_gain: float = 0.9
+    hard_gain: float = 0.12
+    #: Particles a hand must touch before it counts as pressing a body.
+    min_contact: int = 4
+    #: The most the displayed hand is ever held back, metres.
+    max_offset: float = 0.12
+    #: Frames without contact before a press is over.  Against a hard
+    #: surface the held-back hand sits right at the matter and the contact
+    #: count flickers between zero and a dozen frame to frame; a press that
+    #: is still deep is kept for six times this before it is dropped.
+    release_frames: int = 4
+    #: Time constants, seconds: the offset following its target, relaxing
+    #: after a press, and relaxing while the hand holds something.
+    smoothing: float = 0.03
+    relax_time: float = 0.10
+    hold_relax_time: float = 0.40
+    #: How quickly the push-back direction follows a curved surface.
+    normal_follow: float = 0.25
+
+
+@dataclass(frozen=True, slots=True)
 class ExhibitConfig:
     """What a venue needs on top of the simulation (see :mod:`fctx.exhibit`).
 
@@ -316,6 +344,9 @@ class AppConfig:
     camera: CameraConfig = field(default_factory=CameraConfig)
     scene: SceneConfig = field(default_factory=SceneConfig)
     exhibit: ExhibitConfig = field(default_factory=ExhibitConfig)
+    haptics: HapticsConfig = field(default_factory=HapticsConfig)
+    #: A sensory-evaluation study to run (``fctx.study``); None for free play.
+    study: Path | None = None
     device: str = "cuda:0"
     #: Exit after this many frames.  Used by the smoke tests; 0 means run
     #: until the window is closed.

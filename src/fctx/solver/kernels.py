@@ -1200,6 +1200,52 @@ def clear_int(a: wp.array(dtype=wp.int32)) -> None:
 
 
 @wp.kernel
+def hand_body_contact(x: wp.array(dtype=wp.vec3),
+                      normal: wp.array(dtype=wp.vec3),
+                      radius: wp.array(dtype=float),
+                      body: wp.array(dtype=wp.int32),
+                      cap_a: wp.array(dtype=wp.vec3),
+                      cap_b: wp.array(dtype=wp.vec3),
+                      cap_r: wp.array(dtype=float),
+                      n_caps: int,
+                      bones: int,
+                      num_bodies: int,
+                      margin: float,
+                      out_count: wp.array(dtype=wp.int32),
+                      out_normal: wp.array(dtype=wp.vec3),
+                      out_pos: wp.array(dtype=wp.vec3)) -> None:
+    """Which hand is touching which body, and from which side.
+
+    For every particle within ``margin`` of a hand's capsules, add one to the
+    (hand slot, body) cell and accumulate the particle's surface normal and
+    position there.  A particle is counted once per hand however many of
+    that hand's bones reach it.  Read-only on the simulation: this runs
+    after the step, for the pseudo-haptic proxy and the study's touch
+    bookkeeping, and changes nothing the solver sees.
+    """
+    i = wp.tid()
+    p = x[i]
+    ri = radius[i]
+    bi = body[i]
+    last_slot = int(-1)
+    for c in range(n_caps):
+        r = cap_r[c]
+        slot = c / bones
+        if r > 0.0 and slot != last_slot:
+            a = cap_a[c]
+            ab = cap_b[c] - a
+            denom = wp.max(wp.dot(ab, ab), 1.0e-12)
+            t = wp.clamp(wp.dot(p - a, ab) / denom, 0.0, 1.0)
+            d = wp.length(p - (a + ab * t))
+            if d < r + ri + margin:
+                k = slot * num_bodies + bi
+                wp.atomic_add(out_count, k, 1)
+                wp.atomic_add(out_normal, k, normal[i])
+                wp.atomic_add(out_pos, k, p)
+                last_slot = slot
+
+
+@wp.kernel
 def apply_skin(x: wp.array(dtype=wp.vec3),
                tet_idx: wp.array(dtype=wp.vec4i),
                skin_tet: wp.array(dtype=wp.int32),

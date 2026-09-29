@@ -148,6 +148,64 @@ goto loop
 
 ---
 
+## 5b. 官能評価（スタディ）を回す
+
+試作品なしで「違いがわかるか」「どれが好まれるか」を来場者に答えてもらうモードです。
+`studies/` に二つの例があります。
+
+```bash
+uv run python -m fctx --study studies/hardness_jnd.toml --check          # 本番前の確認
+uv run python -m fctx --config venue.toml --study studies/hardness_jnd.toml --kiosk
+uv run python tools/analyze_study.py studies/results/hardness_jnd.csv --csv jnd_summary.csv --plot jnd.png
+```
+
+**来場者の流れ**：手をかざす → 説明（3 秒）→ 左右の試料を両方押す → 「硬い方（好きな方）の上に手を
+高くかざす」→ 1.2 秒でゲージが満ちて確定 → 次の試行 → 規定数で「ありがとうございました」。
+途中で立ち去ったら（既定 12 秒）そこまでの回答を残して次の人を待ちます。スタッフは `Z`（左）/ `X`（右）で
+代理回答できます（記録上 `response_mode = key` として区別されます）。
+
+常設で回すなら `venue.toml` の先頭に `study = "studies/hardness_jnd.toml"` と書けば、`run_kiosk.bat` がそのままスタディで起動します（12 時間ごとの定期再起動をまたいでも階段法は CSV から続きます）。
+
+**ブラインドは自動**です。スタディ中は二つの試料が同じ色・同じ質感になり、HUD・素材名・デモ・アトラクト・
+硬さジェスチャ・プリセット切替はすべて無効になります。
+
+**スタディファイル**（`[study]` 表。未知のキーは起動時にエラー）：
+
+| キー | 意味 |
+|---|---|
+| `protocol` | `discrimination`（どちらが硬い？二肢強制選択）／`preference`（どちらが好き？一対比較） |
+| `reference` / `reference_material` | 基準の硬さ（ダイヤル値）、またはカタログの素材名 |
+| `materials` | preference で比べる素材名（カタログ、`--catalog` の自社素材も可） |
+| `trials` | 一人あたりの試行数（展示なら 6〜10） |
+| `staircase_scope` | `study`：来場者をまたいで階段法を続ける（展示向け、再起動しても再開）／`participant`：一人ずつ |
+| `pseudo_haptics` | `on` / `off` / `alternate`（交互。疑似触覚の効果を測る） |
+| `explore_min` `touch_min` `dwell` `session_gap` | 探索の最低時間、各試料に触れる最低時間、回答の注視時間、離脱判定 |
+| `output` | 結果 CSV（スタディファイルからの相対パス） |
+| `prompt_*` `label_choice` | 画面の案内文（日本語可） |
+
+**解析の読み方**：
+
+```
+DISCRIMINATION  (threshold = hardness-dial difference at 75% correct)
+  pseudo-haptics  on:  120 trials,  14 people, 78% correct
+      threshold 0.071 [0.058, 0.090]  staircase 0.066  -> modulus Weber fraction 72%
+  pseudo-haptics off:  120 trials,  14 people, 71% correct
+      threshold 0.118 [0.091, 0.160]  staircase 0.109  -> modulus Weber fraction 145%
+  pseudo-haptics effect: threshold off/on = 1.66 [1.18, 2.35]  -> helps
+```
+（上は書式の例で、実測値ではありません。）
+
+- `threshold` はダイヤル上の差で、75% 正答になる点。`Weber fraction` は同じ差をヤング率の比に直したもの
+  （公称値。硬さ 0.4 以上は四面体の剛性上限に入るので、比は大きめに出ます）。
+- `effect` の区間が 1 をまたがなければ、疑似触覚は弁別を「助けた／妨げた」と言えます。またぐなら差は不明です。
+- 30 試行未満の条件には `<< only N trials` が付きます。その閾値は参考値です。
+- `side bias` が 50% から大きく外れる場合（例：常に左）、回答方法の説明か設置位置を見直してください。
+
+**言えることと言えないこと**：結果は「このシミュレーション上で、この会場の来場者が区別できた差」です。
+実製品の判断に使うには、一度だけ実物の試料（ヤング率既知）で同じ手順のパネルを行い、閾値を突き合わせてください。
+
+---
+
 ## 6. 操作の勘どころ
 
 - **つまむ**：親指と人差し指の先を付ける。閾値はヒステリシス付き（0.62 で掴み、0.42 で離す）なので、しっかり閉じて、はっきり開く。

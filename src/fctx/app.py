@@ -25,7 +25,8 @@ from .core.clock import FixedTimestep, PerfMonitor, Rolling, Stopwatch
 from .core.material import DEFAULT_MATERIALS, Material, evaluate
 from .core.types import FrameStats, HandPose, MatterKind
 from .demo import Choreography
-from .exhibit import Coach, HardnessDirector, SessionLog
+from .exhibit import Coach, HardnessDirector, Prompt, SessionLog
+from .haptics import HandContact, PseudoHaptics
 from .interaction import GripManager, Notifier
 from .ui.controls import SYNTHETIC_HELP_LINES, Controls, ControlState
 
@@ -48,6 +49,19 @@ class MatterStudio:
     ATTRACT_WAKE_FRAMES = 3
 
     def __init__(self, cfg: AppConfig) -> None:
+        self.study_cfg = None
+        if cfg.study is not None:
+            from .study import load_study
+
+            self.study_cfg = load_study(cfg.study)
+            # A blind test: nothing on screen may name or show the hardness,
+            # and nothing may run the dial but the study.  The demonstration
+            # and attract mode would both take the stage from a participant.
+            cfg = replace(
+                cfg, idle_demo=0.0, demo=False,
+                render=replace(cfg.render, show_hud=False),
+                exhibit=replace(cfg.exhibit, coach=False, show_material=False,
+                                hardness_by_free_hand=False, sweep_while_holding=False))
         self.cfg = cfg
         self._closed = False
         self._wind_on = cfg.solver.wind != (0.0, 0.0, 0.0)
@@ -85,7 +99,19 @@ class MatterStudio:
         self._create_source = create_source
         self._CameraUnavailable = CameraUnavailable
 
-        self.bodies = build_scene(cfg.scene)
+        if self.study_cfg is not None:
+            from .bodies import build_samples
+
+            sc = self.study_cfg
+            scene = replace(cfg.scene, kind=MatterKind[sc.kind.upper()],
+                            soft_size=sc.sample_size, soft_resolution=sc.resolution,
+                            soft_height=max(cfg.scene.soft_height, sc.sample_size * 0.9))
+            if sc.kind == "cloth":
+                scene = replace(scene, cloth_size=sc.sample_size * 1.6)
+            self.bodies = build_samples(scene, 2, sc.spacing)
+            cfg = self.cfg = replace(cfg, scene=scene)
+        else:
+            self.bodies = build_scene(cfg.scene)
         for body in self.bodies:
             body.validate()
         self.state = SolverState(self.bodies, cfg, self.device)
@@ -131,6 +157,19 @@ class MatterStudio:
         self.coach = Coach(ex)
         self._prompt = None
         self.session = SessionLog(ex.analytics, ex.session_gap)
+        self.haptics = PseudoHaptics(cfg.haptics)
+        self._contacts: dict[int, HandContact] = {}
+        self._touching: set[int] = set()
+        self._display_poses: list[HandPose] = []
+        self.study = None
+        if self.study_cfg is not None:
+            from .study import Study, StudyLog
+
+            self.study = Study(self.study_cfg, DEFAULT_MATERIALS[self.bodies[0].kind],
+                               cfg.tracking, log=StudyLog(self.study_cfg.output))
+            print(f"fctx: study {self.study_cfg.name!r} ({self.study_cfg.protocol}), "
+                  f"writing {self.study_cfg.output}; "
+                  f"{len(self.study.log.previous(self.study_cfg.name))} earlier rows")
         self.catalog = (catalog_mod.load_catalog(ex.catalog) if ex.catalog is not None
                         else catalog_mod.DEFAULT_CATALOG)
         if ex.catalog is not None:
@@ -446,7 +485,17 @@ class MatterStudio:
         # does on the other branch.
         return needed * tan_half * min(1.0, aspect) / 1.18
 
+    #: Every sample in a study is drawn in this one look, whatever its
+    #: hardness: the colour, gloss and translucency the dial normally moves
+    #: would give the answer away.
+    STUDY_LOOK = dict(color=(0.80, 0.76, 0.72), roughness=0.45, metallic=0.0,
+                      translucency=0.35)
+
     def _evaluate_materials(self, hardness: float) -> list[Material]:
+        study = getattr(self, "study", None)
+        if study is not None:
+            return [replace(evaluate(DEFAULT_MATERIALS[b.kind], h), **self.STUDY_LOOK)
+                    for b, h in zip(self.bodies, study.hardness)]
         return [evaluate(DEFAULT_MATERIALS[b.kind], hardness) for b in self.bodies]
 
     def _start_recording(self, path: Path) -> None:
@@ -497,7 +546,7 @@ class MatterStudio:
             ctrl = self.controls.update(frame_dt)
             if ctrl.quit_requested:
                 break
-            if ctrl.demo_toggle_requested:
+            if ctrl.demo_toggle_requested and self.study is None:
                 self._stop_demo() if self.demo else self._start_demo()
             if self.demo is not None:
                 self._apply_demo(ctrl)
@@ -554,6 +603,10 @@ class MatterStudio:
         return self._benchmark_report() if self.cfg.headless else None
 
     def _apply_commands(self, ctrl: ControlState) -> None:
+        if self.study is not None:
+            ctrl.preset_requested = None
+            ctrl.demo_toggle_requested = False
+            ctrl.material_step = 0
         if ctrl.material_step and self.materials:
             entry = catalog_mod.step(self.catalog, self.materials[0], ctrl.material_step)
             if entry is not None:
@@ -794,8 +847,14 @@ class MatterStudio:
         # the collider fade by this value, and a one-second hitch that lands
         # on the frame a hand first appears would otherwise skip the fade
         # entirely and materialise a full-radius hand inside the matter.
-        self.solver.set_hands(self._poses, min(frame_dt, self.clock.max_delta))
-        grips = self.grips.update(self._poses, frame_dt, self.solver)
+        # Pseudo-haptics: the hand the solver and the screen get is the real
+        # one held back by whatever it was pressing last frame.
+        held = {g.track_id for g in self.grips.grips if g.held}
+        self._display_poses = self.haptics.update(
+            self._poses, self._contacts, [m.hardness for m in self.materials],
+            held, frame_dt)
+        self.solver.set_hands(self._display_poses, min(frame_dt, self.clock.max_delta))
+        grips = self.grips.update(self._display_poses, frame_dt, self.solver)
         self._venue_frame(ctrl, grips, frame_dt)
 
         steps = 1 if self.cfg.lockstep else self.clock.tick()
@@ -806,6 +865,7 @@ class MatterStudio:
             self.solver.step(dt)
         if steps or not ctrl.paused:
             self.solver.compute_normals()
+        self._read_contacts()
 
         # stats() reads a device counter, which costs a synchronisation. The
         # HUD does not need it every frame, and at 90 Hz nobody can read a
@@ -822,6 +882,8 @@ class MatterStudio:
         the next frame like any other input.
         """
         holding = {g.track_id for g in grips if g.held}
+        if self.study is not None:
+            self._study_frame(ctrl, frame_dt)
         for g in grips:
             if g.just_grabbed:
                 self.session.grab(g.track_id)
@@ -840,7 +902,47 @@ class MatterStudio:
             len(self._poses) if live else 0, bool(holding), ctrl.hardness,
             self.director.driving, frame_dt)
 
+    def _read_contacts(self) -> None:
+        """Which hand touches which body, for pseudo-haptics and the study.
+
+        Skipped when no hand is on stage: it synchronises with the device,
+        and with nobody there the answer is known.
+        """
+        if not self._display_poses or not (self.haptics.enabled or self.study is not None):
+            self._contacts = {}
+            self._touching = set()
+            self.solver.discard_contacts()
+            return
+        report = self.solver.hand_contacts_async()
+        if report is None:
+            return
+        count, normal, position = report
+        contacts: dict[int, HandContact] = {}
+        touching: set[int] = set()
+        for slot, pose in self.solver.slot_map(self._display_poses).items():
+            c = HandContact(count[slot], normal[slot], position[slot])
+            contacts[pose.track_id] = c
+            touching.update(int(i) for i in (count[slot] >= self.cfg.haptics.min_contact).nonzero()[0])
+        self._contacts = contacts
+        self._touching = touching
+
+    def _study_frame(self, ctrl: ControlState, frame_dt: float) -> None:
+        study = self.study
+        before = (study.participant, study.trial_count, study.phase)
+        study.update(self._poses, self._touching, frame_dt, ctrl.study_key)
+        # The condition is the study's to set, trial by trial.
+        self.haptics.enabled = study.condition == "on"
+        if study.reset_scene:
+            study.reset_scene = False
+            self.solver.reset()
+            self.grips.reset()
+            self.haptics.reset()
+            self._contacts = {}
+        if (study.participant, study.trial_count, study.phase) != before:
+            self.log("study: " + study.status())
+
     def _draw(self, ctrl: ControlState) -> None:
+        self.renderer.panels = self.study.panels if self.study is not None else []
         stats = FrameStats(
             frame_ms=self.perf.frame.mean,
             physics_ms=self.physics_ms.mean,
@@ -857,14 +959,16 @@ class MatterStudio:
         )
         self.renderer.draw(
             camera=self.camera,
-            poses=self._poses if ctrl.show_hands else [],
+            poses=self._display_poses if ctrl.show_hands else [],
             materials=self.materials,
             preview=self._preview if ctrl.show_webcam else None,
             stats=stats,
             hud_lines=self._hud_lines(ctrl),
             hardness=ctrl.hardness,
             notifications=(self.notify.update(self.perf.frame.last / 1000.0)
-                           + ([self._prompt] if self._prompt is not None else [])),
+                           + ([self._prompt] if self._prompt is not None else [])
+                           + ([Prompt(self.study.prompt)]
+                              if self.study is not None and self.study.prompt else [])),
             show_hud=ctrl.show_hud,
             paused=ctrl.paused,
         )

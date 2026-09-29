@@ -681,6 +681,113 @@ class XPBDSolver:
         wp.launch(K.normalize_normals, dim=st.num_particles, inputs=[st.normal],
                   device=self.device)
 
+    #: How far outside a capsule a particle still counts as touched.  A
+    #: couple of millimetres: the solver pushes particles to the capsule
+    #: surface, so contact that is held reads as a gap of about zero.
+    CONTACT_MARGIN = 0.006
+
+    def hand_contacts(self, margin: float | None = None
+                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Per (hand slot, body): particles touched, summed normals, summed positions.
+
+        Returns ``count`` of shape ``(max_hands, num_bodies)`` and ``normal``
+        and ``position`` sums of shape ``(max_hands, num_bodies, 3)``; divide
+        the position sum by the count for the contact centroid.  Hand slots
+        are the solver's own (:meth:`slot_map`).  This reads three small
+        arrays back from the device, so it synchronises; call it once per
+        frame, after :meth:`compute_normals`.
+        """
+        st = self.state
+        h, b = st.max_hands, st.num_bodies
+        if not hasattr(self, "_touch_count"):
+            self._touch_count = wp.zeros(h * b, dtype=wp.int32, device=self.device)
+            self._touch_normal = wp.zeros(h * b, dtype=wp.vec3, device=self.device)
+            self._touch_pos = wp.zeros(h * b, dtype=wp.vec3, device=self.device)
+        self._touch_count.zero_()
+        self._touch_normal.zero_()
+        self._touch_pos.zero_()
+        wp.launch(K.hand_body_contact, dim=st.num_particles,
+                  inputs=[st.x, st.normal, st.radius, st.body,
+                          st.cap_a, st.cap_b, st.cap_r,
+                          int(st.capsule_capacity), int(st.bones_per_hand), int(b),
+                          float(self.CONTACT_MARGIN if margin is None else margin),
+                          self._touch_count, self._touch_normal, self._touch_pos],
+                  device=self.device)
+        count = self._touch_count.numpy().reshape(h, b)
+        normal = self._touch_normal.numpy().reshape(h, b, 3)
+        position = self._touch_pos.numpy().reshape(h, b, 3)
+        return count, normal, position
+
+    def discard_contacts(self) -> None:
+        """Forget an in-flight :meth:`hand_contacts_async` report.
+
+        After a reset, or a stretch with no hand on stage, the pending report
+        describes a scene that no longer exists; handing it to the proxy
+        would anchor a new press to the old one.
+        """
+        self._touch_ready = None
+
+    def hand_contacts_async(self) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """:meth:`hand_contacts` without stalling the frame.
+
+        Launches the contact kernel and an asynchronous copy into one of two
+        pinned host buffers, and returns what the *previous* call launched --
+        long finished by now, so waiting on its event costs nothing.  The
+        synchronous version made the CPU wait for the whole physics step
+        every frame (121 -> 95 fps on the soft preset); this costs one more
+        frame of latency on the contact report, 17 ms at 60 Hz, which the
+        pseudo-haptic proxy does not feel.  Returns None on the first call.
+        """
+        st = self.state
+        h, b = st.max_hands, st.num_bodies
+        if not hasattr(self, "_touch_host"):
+            self._touch_count = wp.zeros(h * b, dtype=wp.int32, device=self.device)
+            self._touch_normal = wp.zeros(h * b, dtype=wp.vec3, device=self.device)
+            self._touch_pos = wp.zeros(h * b, dtype=wp.vec3, device=self.device)
+            pinned = wp.get_device(self.device).is_cuda
+            self._touch_host = [
+                (wp.empty(h * b, dtype=wp.int32, device="cpu", pinned=pinned),
+                 wp.empty(h * b, dtype=wp.vec3, device="cpu", pinned=pinned),
+                 wp.empty(h * b, dtype=wp.vec3, device="cpu", pinned=pinned))
+                for _ in range(2)]
+            self._touch_events = [wp.Event(wp.get_device(self.device)) if pinned else None
+                                  for _ in range(2)]
+            self._touch_next = 0
+            self._touch_ready: int | None = None
+
+        result = None
+        if self._touch_ready is not None:
+            i = self._touch_ready
+            if self._touch_events[i] is not None:
+                wp.synchronize_event(self._touch_events[i])
+            count, normal, pos = self._touch_host[i]
+            result = (count.numpy().reshape(h, b).copy(),
+                      normal.numpy().reshape(h, b, 3).copy(),
+                      pos.numpy().reshape(h, b, 3).copy())
+
+        i = self._touch_next
+        self._touch_count.zero_()
+        self._touch_normal.zero_()
+        self._touch_pos.zero_()
+        wp.launch(K.hand_body_contact, dim=st.num_particles,
+                  inputs=[st.x, st.normal, st.radius, st.body,
+                          st.cap_a, st.cap_b, st.cap_r,
+                          int(st.capsule_capacity), int(st.bones_per_hand), int(b),
+                          float(self.CONTACT_MARGIN),
+                          self._touch_count, self._touch_normal, self._touch_pos],
+                  device=self.device)
+        dst = self._touch_host[i]
+        wp.copy(dst[0], self._touch_count)
+        wp.copy(dst[1], self._touch_normal)
+        wp.copy(dst[2], self._touch_pos)
+        if self._touch_events[i] is not None:
+            wp.record_event(self._touch_events[i])
+        else:
+            wp.synchronize_device(self.device)
+        self._touch_ready = i
+        self._touch_next = 1 - i
+        return result
+
     def _sanity_sweep(self) -> int:
         """Reset whole bodies that ``contain_particles`` caught since the last
         sweep, and return how many.
@@ -713,6 +820,7 @@ class XPBDSolver:
 
     def reset(self) -> None:
         self.state.reset()
+        self.discard_contacts()
         self._grab_counts = [0] * self.state.max_hands
         self._pinch_since = [None] * self.state.max_hands
         self._prev_present = [False] * self.state.max_hands

@@ -90,6 +90,41 @@ class Hud:
             self._dial(batch, width, height, scale, materials[0], knob)
         self._hint(batch, width, height, scale, bool(materials))
 
+    def panels(self, batch: OverlayBatch, size: tuple[int, int],
+               panels: Sequence[Any]) -> None:
+        """Draw response targets: a labelled box that fills as it is chosen.
+
+        Each item needs ``text``, ``x`` (centre) and ``y`` (top) as fractions
+        of the frame, ``w`` as a fraction of the width, ``progress`` in
+        [0, 1] and ``active``.
+        """
+        width, height = size
+        scale = max(height, 540) / 900.0
+        accent = self.theme.accent
+        for p in panels:
+            w = float(p.w) * width
+            h = 74.0 * scale
+            x = float(p.x) * width - w * 0.5
+            y = float(p.y) * height
+            active = bool(p.active)
+            batch.rect(x, y, w, h, (0.03, 0.05, 0.08, 0.80 if active else 0.55),
+                       radius=14.0 * scale)
+            if active:
+                batch.rect(x - 2.0, y - 2.0, w + 4.0, h + 4.0,
+                           (accent[0], accent[1], accent[2], 0.35), radius=16.0 * scale)
+                batch.rect(x, y, w, h, (0.03, 0.05, 0.08, 0.85), radius=14.0 * scale)
+            size_px = 28.0 * scale
+            batch.text(str(p.text), x + w * 0.5, y + h * 0.5 - size_px * 0.62, size_px,
+                       (1.0, 1.0, 1.0, 1.0 if active else 0.75), align="center")
+            bar = 7.0 * scale
+            prog = min(max(float(p.progress), 0.0), 1.0)
+            batch.rect(x + 12.0 * scale, y + h - bar - 9.0 * scale,
+                       w - 24.0 * scale, bar, (1.0, 1.0, 1.0, 0.12), radius=bar * 0.5)
+            if prog > 0.0:
+                batch.rect(x + 12.0 * scale, y + h - bar - 9.0 * scale,
+                           (w - 24.0 * scale) * prog, bar,
+                           (accent[0], accent[1], accent[2], 1.0), radius=bar * 0.5)
+
     def badges(self, batch: OverlayBatch, size: tuple[int, int],
                notifications: Sequence[Any] = (), paused: bool = False) -> None:
         """Draw transient messages and the paused marker.

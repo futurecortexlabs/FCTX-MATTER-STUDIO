@@ -72,6 +72,8 @@ class ControlState:
     #: +1 / -1 for one frame: step the dial to the next / previous
     #: catalogue material (M / N).
     material_step: int = 0
+    #: 0 / 1 for one frame: a staff answer for the study (Z left, X right).
+    study_key: int | None = None
     _sweep_phase: float = 0.0
 
     preset_index: int = 0
@@ -114,6 +116,7 @@ class ControlState:
         self.record_toggle_requested = False
         self.demo_toggle_requested = False
         self.material_step = 0
+        self.study_key = None
         self.step_once = False
         self.orbit_delta = (0.0, 0.0)
         self.zoom_delta = 0.0
@@ -197,6 +200,10 @@ class Controls:
                 s.wind = not s.wind
             case "d":
                 s.demo_toggle_requested = True
+            case "z":
+                s.study_key = 0
+            case "x":
+                s.study_key = 1
             case "m":
                 s.material_step = 1
             case "n":

@@ -23,7 +23,8 @@ if not PYTHON.exists():
     PYTHON = Path(sys.executable)
 
 #: Test files that need a GPU or a display.
-NEEDS_DEVICE = {"test_solver.py", "test_render.py", "test_smoke.py", "test_resilience.py"}
+NEEDS_DEVICE = {"test_solver.py", "test_render.py", "test_smoke.py", "test_resilience.py",
+                "test_study_app.py"}
 
 
 def main(argv: list[str]) -> int:

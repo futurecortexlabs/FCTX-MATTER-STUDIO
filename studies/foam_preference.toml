@@ -1,0 +1,19 @@
+# 好みの一対比較：カタログの素材から総当たり（左右入れ替えも）で「どちらが好き？」。
+# 解析は Bradley–Terry で強さと順位を出す。自社素材は --catalog materials.toml で追加。
+#   uv run python -m fctx --study studies/foam_preference.toml --kiosk
+[study]
+name = "foam_preference"
+protocol = "preference"
+kind = "soft"
+materials = ["SOFT SILICONE GEL", "SOFT TISSUE", "MEMORY FOAM", "SILICONE RUBBER"]
+trials = 12
+pseudo_haptics = "on"
+output = "results/foam_preference.csv"
+
+prompt_welcome = "手をかざすと始まります"
+prompt_intro = "二つの試料を両方押してから、好きな方を選んでください"
+prompt_explore = "両方の試料を押してみてください"
+prompt_choose_preferred = "好きな方の上に、手を高くかざしてください"
+prompt_recorded = "記録しました"
+prompt_thanks = "ご協力ありがとうございました"
+label_choice = "こちら"

@@ -1,0 +1,22 @@
+# 弁別閾（JND）の測定：「どちらが硬い？」の二肢強制選択と 2-down-1-up 階段法。
+# 疑似触覚あり／なしを試行ごとに交互に出し、条件ごとに別の階段で閾値を測る。
+#   uv run python -m fctx --study studies/hardness_jnd.toml --kiosk
+#   uv run python tools/analyze_study.py studies/results/hardness_jnd.csv
+[study]
+name = "hardness_jnd"
+protocol = "discrimination"
+kind = "soft"
+reference = 0.30                # 基準の硬さ（ダイヤル位置）。reference_material で素材名でも可
+                                # 0.4 を超えると四面体の剛性上限に入り、ヤング率換算が公称値になる
+trials = 10                     # 一人あたりの試行数
+staircase_scope = "study"       # 来場者をまたいで一本の階段を続ける（再起動しても CSV から再開）
+pseudo_haptics = "alternate"    # on / off / alternate
+output = "results/hardness_jnd.csv"
+
+prompt_welcome = "手をかざすと始まります"
+prompt_intro = "二つの試料を両方押してから、答えてください"
+prompt_explore = "両方の試料を押してみてください"
+prompt_choose_harder = "硬いと思う方の上に、手を高くかざしてください"
+prompt_recorded = "記録しました"
+prompt_thanks = "ご協力ありがとうございました"
+label_choice = "こちら"
