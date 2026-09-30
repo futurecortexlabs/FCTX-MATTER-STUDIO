@@ -8,8 +8,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
       - name: ruff
         run: uvx ruff check src tests tools
 
@@ -26,12 +26,16 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
       - name: install
         run: uv sync --frozen
+      - name: hand model
+        # Not committed (it is Google's, Apache-2.0, 7.8 MB); fetched and
+        # sha256-checked exactly as a user's setup does, which also tests that.
+        run: uv run python tools/download_models.py
       - name: cpu tests
         env:
           FCTX_DEVICE: cpu
